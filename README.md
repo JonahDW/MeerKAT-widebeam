@@ -1,10 +1,10 @@
 # PB-correction
 
-This module contains several files that are all in one way or another related to correcting the effects of the primary beam on radio images. 
+This module contains several files that are all in one way or another related to correcting the effects of the primary beam on MeerKAT radio images. 
 
 ## mkat_primary_beam_correct.py
 
-This script, courtesy of Kenda Knowles, uses functionality from the `katbeam`[https://github.com/ska-sa/katbeam] module to correct images with primary beam model from MeerKAT. Currently, L-, S-, and UHF-band are supported. The input image can be in FITS or CASA format.
+This script, courtesy of Kenda Knowles, uses functionality from the [`katbeam`](https://github.com/ska-sa/katbeam) module to correct images with primary beam model from MeerKAT. Currently, L-, S-, and UHF-band are supported. The input image can be in FITS or CASA format.
 
 ```
 usage: mkat_primary_beam_correct [-h] [-b BAND] [-t THRESH] [-T] image_file
