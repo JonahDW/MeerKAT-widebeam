@@ -63,7 +63,7 @@ class Catalog:
             except ValueError:
                 alpha = self.table[alpha]
         else:
-            alpha = -0.8
+            alpha = -0.75
 
         correction = flux_correction(dist, self.frequency_range, self.freq, alpha)
 

@@ -2,6 +2,47 @@
 
 This module contains several files that are all in one way or another related to correcting the effects of the primary beam on MeerKAT radio images. 
 
+## mkat_widebandpbcor.py
+
+Calculate and apply primary beam correction for wideband data using primary beams and multiple frequencies. These can be generated using katbeam, or a series of primary beam images can be given at different frequencies. These are fit with the desired number of Taylor terms and applied to the corresponding Taylor term images. If the number of Taylor terms is two or more, a spectral index image is automatically generated.
+
+```
+usage: mkat_widebandpbcor.py [-h] [--model MODEL [MODEL ...]]
+                             [--nterms NTERMS] [--freqs FREQS [FREQS ...]]
+                             [-b BAND] [-t THRESH] [-T]
+                             [--alpha_thresh ALPHA_THRESH]
+                             image_name
+
+positional arguments:
+  image_name            An image to correct. Input assumes CASA file
+                        structure, i.e. image_name.image.tt0,
+                        image_name.image.tt1, etc.
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --model MODEL [MODEL ...]
+  --nterms NTERMS       Number of Taylor coefficients
+  --freqs FREQS [FREQS ...]
+                        If using katbeam, which frequencies (in MHz) to use to
+                        generate the primary beam. The number of frequencies
+                        should be equal or greater than the number of Taylor
+                        terms, and for more accurate results should resemble
+                        the frequency structure of the data used for your
+                        imaging
+  -b BAND, --band BAND  If using katbeam, specify band for which primary beam
+                        model will be used, can be L, UHF, or S (default = L).
+  -t THRESH, --threshold THRESH
+                        Threshold (at central frequency) below which image
+                        pixels will be set to blank values (nan). Use to
+                        remove areas where the primary beam correction is
+                        large.
+  -T, --trim            Trim image outside valid region (set by --threshold)
+                        to reduce size.
+  --alpha_thresh ALPHA_THRESH
+                        Mask all pixels below this flux level in the spectral
+                        index image.
+```
+
 ## mkat_primary_beam_correct.py
 
 This script, courtesy of Kenda Knowles, uses functionality from the [`katbeam`](https://github.com/ska-sa/katbeam) module to correct images with primary beam model from MeerKAT. Currently, L-, S-, and UHF-band are supported. The input image can be in FITS or CASA format.
@@ -26,7 +67,7 @@ optional arguments:
 
 ## create_alpha_primary_beam.py
 
-This script creates a spectral index image from the CASA `tt0` and `tt1` images, and optionally applies primary beam correction to the images
+Creates a spectral index image from the CASA `tt0` and `tt1` images, and optionally applies primary beam correction to the images
 
 ```
 usage: create_alpha_primary_beam.py [-h] [-t THRESHOLD] [--pbcor] tt0 tt1
@@ -44,9 +85,10 @@ optional arguments:
                         degrees.
 ```
 
+
 ## alpha_flux_corrections.py
 
-This script takes a catalog of sources and calculates and applies residual corrections to the fluxes and spectral indices of sources. These residual corrections are necessary if the images from which they were derived had a large bandwidth.
+Take a catalog of sources and calculates and applies residual corrections to the fluxes and spectral indices of sources. These residual corrections are necessary if the images from which they were derived had a large bandwidth.
 
 ```
 usage: alpha_flux_corrections.py [-h] [-d DIST_COL]
