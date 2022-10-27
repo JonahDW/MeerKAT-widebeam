@@ -4,7 +4,7 @@ This module contains several files that are all in one way or another related to
 
 ## mkat_widebandpbcor.py
 
-Calculate and apply primary beam correction for wideband data using primary beams and multiple frequencies. These can be generated using katbeam, or a series of primary beam images can be given at different frequencies. These are fit with the desired number of Taylor terms and applied to the corresponding Taylor term images. If the number of Taylor terms is two or more, a spectral index image is automatically generated.
+Calculate and apply primary beam correction for wideband data using primary beams and multiple frequencies. These can be generated using katbeam, or a series of primary beam images can be given at different frequencies. These are fit with the desired number of Taylor terms and applied to the corresponding Taylor term images. If the number of Taylor terms is two or more, a spectral index image is automatically generated. The procedure to do the primary beam correction is meant to emulate the procedure as it is done in the CASA [`widebandpbcor`](https://casa.nrao.edu/docs/taskref/widebandpbcor-task.html) task.
 
 ```
 usage: mkat_widebandpbcor.py [-h] [--model MODEL [MODEL ...]]
