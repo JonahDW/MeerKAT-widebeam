@@ -74,14 +74,16 @@ def trim_image(trimg, wcs, freqMHz, band, thresh):
 
     return trimg
 
-def calculate_widebandpb(in_image, model, nterms, band, freqAxis, freqs):
+def calculate_widebandpb(in_image, model, model_images, nterms, band, freqAxis, freqs, write_beams):
     '''
     Calculate the wideband PB correction
     '''
     tt0_img = open_fits_casa(in_image+'.image.tt0')
-    cfreq = tt0_img[0].header['CRVAL'+str(freqAxis)]
+    cfreq = tt0_img[0].header['CRVAL'+str(freqAxis)]/1e6 #MHz
     dfreq = tt0_img[0].header['CDELT'+str(freqAxis)]
-    im_shape = tt0_img[0].data[0, 0].shape
+
+    temp_img = tt0_img
+    im_shape = temp_img[0].data[0, 0].shape
 
     if model == 'katbeam':
         try:
@@ -101,12 +103,24 @@ def calculate_widebandpb(in_image, model, nterms, band, freqAxis, freqs):
         maxRDeg = 5.0
         xDegMap, yDegMap = nemoCython.makeXYDegreesDistanceMaps(np.ones(im_shape, dtype = np.float64), wcs, RADeg, decDeg, maxRDeg)
 
-        pbs = np.zeros(shape=(3,len(xDegMap),len(yDegMap)))
+        freqs = np.array(freqs, dtype=float)
+        pbs = np.zeros(shape=(len(freqs),len(xDegMap)*len(yDegMap)))
         for i, freqMHz in enumerate(freqs):
-            pbs[i,:,:] = beam.I(xDegMap, yDegMap, freqMHz)
+            pbs[i,:] = beam.I(xDegMap, yDegMap, freqMHz).flatten()
 
-    else:
-        pb_images = model
+    if model == 'plumber':
+        pb_images = model_images
+
+        pbs = np.zeros(shape=(len(pb_images),im_shape[0]*im_shape[1]))
+        freqs = np.zeros(len(pb_images))
+        for i, pb_im in enumerate(pb_images):
+            imagedata = open_fits_casa(pb_im)
+            pbs[i,:] = imagedata[0].data[0,0].flatten()
+
+            freqs[i] = float(pb_im.split('_')[-1].split('M')[0])
+
+    if model == 'holo':
+        pb_images = model_images
 
         pbs = np.zeros(shape=(len(pb_images),im_shape[0]*im_shape[1]))
         freqs = np.zeros(len(pb_images))
@@ -114,10 +128,31 @@ def calculate_widebandpb(in_image, model, nterms, band, freqAxis, freqs):
             imagedata = open_fits_casa(pb_im)
 
             pbs[i,:] = imagedata[0].data[0,0].flatten()
-            freqs[i] = imagedata[0].header['CRVAL3']-imagedata[0].header['CRPIX3']*imagedata[0].header['CDELT3']
+            freqs[i] = (imagedata[0].header['CRVAL3']-imagedata[0].header['CRPIX3']*imagedata[0].header['CDELT3'])/1e6 #MHz
 
+    # Make sure frequencies are sorted
+    sorted_freq = freqs.argsort()
+    freqs = freqs[sorted_freq]
+    pbs = pbs[sorted_freq,:]
+
+    y = pbs
     x = (freqs-cfreq)/cfreq
-    pb_polyfit  = np.polynomial.polynomial.polyfit(x, pbs, deg=nterms-1)
+    pb_polyfit = np.polynomial.polynomial.polyfit(x, y, deg=nterms-1)
+
+    # Renormalize tt0 to correct any small errors
+    pb_polyfit[0,:] /= np.nanmax(pb_polyfit[0,:])
+
+    if write_beams:
+        # Write PB images
+        temp_img[0].data[0,0,:,:] = pb_polyfit[0,:].reshape(im_shape[0], im_shape[1])
+        temp_img.writeto('pb_tt0.fits', overwrite=True)
+        if nterms > 1:
+            temp_img[0].data[0,0,:,:] = pb_polyfit[1,:].reshape(im_shape[0], im_shape[1])
+            temp_img.writeto('pb_tt1.fits', overwrite=True)
+
+            temp_img[0].data[0,0,:,:] = (pb_polyfit[1,:].reshape(im_shape[0], im_shape[1])
+                                        / pb_polyfit[0,:].reshape(im_shape[0], im_shape[1]))
+            temp_img.writeto('pb_alpha.fits', overwrite=True)
 
     return pb_polyfit[:nterms,:]
 
@@ -128,7 +163,9 @@ def main():
 
     in_image = args.image_name
     model = args.model
+    model_images = args.model_images
     nterms = args.nterms
+    write_beams = args.write_beams
     freqs = args.freqs
     band = args.band
     thresh = args.thresh
@@ -161,20 +198,20 @@ def main():
     fileBaseName = os.path.basename(in_image).split('.')[0]
 
     # Calculate wideband Taylor terms
-    pb_tt = calculate_widebandpb(in_image, model, nterms, band, freqAxis)
+    pb_tt = calculate_widebandpb(in_image, model, model_images, nterms, band, freqAxis, freqs, write_beams)
 
     tt0_img = open_fits_casa(in_image+'.image.tt0')
     pb_tt0 = pb_tt[0,:].reshape(tt0_img[0].data.shape[2],tt0_img[0].data.shape[3])
 
     # Apply PB correction
-    tt0_img[0].data[0,0,:,:] /= pb_tt0
+    tt0_img[0].data[0,0,:,:] = tt0_img[0].data[0,0,:,:]/pb_tt0
     tt0_untrimmed = copy.deepcopy(tt0_img)
 
     # Add beam model to header and write to file
     if model == 'katbeam':
         tt0_img[0].header['PBCOR'] = 'katbeam-'+katbeam.__version__
     else:
-        tt0_img[0].header['PBCOR'] = 'HOLO'
+        tt0_img[0].header['PBCOR'] = model
     tt0_img = trim_image(tt0_img, wcs, freqMHz, band, thresh)
     outFileName = os.path.join(outDir,fileBaseName+"_"+prefix+"_tt0.fits")
     tt0_img.writeto(outFileName, overwrite = True)
@@ -188,21 +225,26 @@ def main():
         tt1_untrimmed = copy.deepcopy(tt1_img)
 
         # Add beam model to header and write to file
-        if model == 'katbeam':
-            tt1_img[0].header['PBCOR'] = 'katbeam-'+katbeam.__version__
-        else:
-            tt1_img[0].header['PBCOR'] = 'HOLO'
-        tt1_img = trim_image(tt1_img, wcs, freqMHz, band, thresh)
-        outFileName = os.path.join(outDir,fileBaseName+"_"+prefix+"_tt1.fits")
-        tt1_img.writeto(outFileName, overwrite = True)
+        #if model == 'katbeam':
+        #    tt1_img[0].header['PBCOR'] = 'katbeam-'+katbeam.__version__
+        #else:
+        #    tt1_img[0].header['PBCOR'] = model
+        #tt1_img = trim_image(tt1_img, wcs, freqMHz, band, thresh)
+        #outFileName = os.path.join(outDir,fileBaseName+"_"+prefix+"_tt1.fits")
+        #tt1_img.writeto(outFileName, overwrite = True)
 
-        # Create alpha image
+        # Create alpha image and apply PB correction
         alpha = tt1_untrimmed[0].data[0,0,:,:]/tt0_untrimmed[0].data[0,0,:,:]
         mask = tt0_untrimmed[0].data[0,0,:,:] < alpha_thresh
         alpha[mask] = np.nan
 
         # Open image so fits data structure is already there
         tt0_untrimmed[0].data[0,0,:,:] = alpha
+        if model == 'katbeam':
+            tt0_untrimmed[0].header['PBCOR'] = 'katbeam-'+katbeam.__version__
+        else:
+            tt0_untrimmed[0].header['PBCOR'] = model
+
         tt0_untrimmed = trim_image(tt0_untrimmed, wcs, freqMHz, band, thresh)
         outFileName = os.path.join(outDir,fileBaseName+"_"+prefix+"_alpha.fits")
         tt0_untrimmed.writeto(outFileName, overwrite = True)
@@ -213,22 +255,30 @@ def new_argument_parser():
 
     parser.add_argument("image_name", type=str, help="""An image to correct. Input assumes 
                         CASA file structure, i.e. image_name.image.tt0, image_name.image.tt1, etc.""")
-    parser.add_argument("--model", nargs='+', default="katbeam")
+    parser.add_argument("--model", type=str, default="katbeam",
+                        help="""Which primary beam model to use, options are katbeam, plumber, 
+                                and holo(graphic) (default=katbeam).""")
+    parser.add_argument("--model_images", nargs='+', default=None,
+                        help="""If using plumber or holo model, specify files with PB images to 
+                                to fit wideband primary beam.""")
     parser.add_argument("--nterms", default=2, type=int, help="Number of Taylor coefficients")
+    parser.add_argument("--write_beams", action='store_true',
+                        help="""Write derived beams to fits files (default=do not write files).""")
     parser.add_argument("--freqs", nargs='+', default=1285,
                         help="""If using katbeam, which frequencies (in MHz) to use to generate the primary beam.
                                 The number of frequencies should be equal or greater than the number of Taylor terms,
                                 and for more accurate results should resemble the frequency structure of the data
-                                used for your imaging""")
-    parser.add_argument("-b", "--band", dest="band", default="L", help="""If using katbeam, 
-                        specify band for which primary beam model will be used, can be L, UHF, or S (default = L).""")
-    parser.add_argument("-t", "--threshold", dest="thresh", help="""Threshold (at central frequency) below which 
-                        image pixels will be set to blank values (nan). Use to remove areas where the primary beam
-                        correction is large.""", default=0.3, type=float)
+                                used for your imaging (default=1285)""")
+    parser.add_argument("-b", "--band", dest="band", default="L", help="""If using katbeam, specify band 
+                            for which primary beam model will be used, can be L, UHF, or S (default = L).""")
+    parser.add_argument("-t", "--threshold", dest="thresh", default=0.3, type=float,
+                        help="""Threshold (at central frequency) below which image pixels will be 
+                                set to blank values (nan). Use to remove areas where the primary beam
+                                correction is large (default=0.3).""")
     parser.add_argument("-T", "--trim", dest="trim", help="""Trim image outside valid region (set by
                         --threshold) to reduce size.""", default=False, action='store_true')
     parser.add_argument("--alpha_thresh", default=0, type=float,
-                        help="""Mask all pixels below this flux level in the spectral index image.""")
+                        help="""Mask all pixels below this flux level in the spectral index image (default=0).""")
 
     return parser
 
