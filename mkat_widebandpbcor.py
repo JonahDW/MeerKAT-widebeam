@@ -16,7 +16,6 @@ import katbeam
 
 from katbeam import JimBeam
 from astLib import *
-import nemoCython
 
 import casacore.images as pim
 
@@ -38,7 +37,31 @@ def open_fits_casa(file):
 
     return imagedata
 
-def trim_image(trimg, wcs, freqMHz, band, thresh):
+def makeXYDegreesDistanceMaps(image, wcs, RADeg, decDeg):
+    """
+    Returns an array of distance along x, y axes in degrees from given position.
+    Inspired by original function from: https://github.com/simonsobs/nemo/blob/main/nemo/nemoCython.pyx
+    """
+    x0, y0 = wcs.wcs2pix(RADeg, decDeg)
+    ra0, dec0 = RADeg, decDeg
+    ra1, dec1 = wcs.pix2wcs(x0+1, y0+1)
+    xPixScale = astCoords.calcAngSepDeg(ra0, dec0, ra1, dec0)
+    yPixScale = astCoords.calcAngSepDeg(ra0, dec0, ra0, dec1)
+
+    Y = image.shape[0]
+    X = image.shape[1]
+
+    # Real space map of angular distance in degrees
+    xDegreesMap = np.ones([Y, X], dtype=np.float64)
+    yDegreesMap = np.ones([Y, X], dtype=np.float64)
+
+    xx, yy = np.meshgrid(np.arange(X), np.arange(Y))
+    xDegreesMap = (xx-x0)*xPixScale
+    yDegreesMap = (yy-y0)*yPixScale
+
+    return xDegreesMap, yDegreesMap
+
+def trim_image(trimg, wcs, freqMHz, band, thresh, trim):
 
     try:
         beam = JimBeam('MKAT-AA-%s-JIM-2020' % band.upper())
@@ -48,29 +71,29 @@ def trim_image(trimg, wcs, freqMHz, band, thresh):
 
     shape = trimg[0].data[0, 0].shape
     RADeg, decDeg = wcs.getCentreWCSCoords()
-    maxRDeg = 5.0
-    xDegMap, yDegMap = nemoCython.makeXYDegreesDistanceMaps(np.ones(shape, dtype = np.float64), wcs, RADeg, decDeg, maxRDeg)
+    xDegMap, yDegMap = makeXYDegreesDistanceMaps(np.ones(shape, dtype = np.float64), wcs, RADeg, decDeg)
 
     central_I = beam.I(xDegMap, yDegMap, freqMHz)
     trimg[0].data[0,0][central_I < thresh] = np.nan
 
-    # Assumes N is at the top, E at the left
-    y, x = np.where(central_I >= thresh)
-    yMin, yMax = y.min(), y.max()
-    xMin, xMax = x.min(), x.max()
-    _, decMin = wcs.pix2wcs(xMax, yMin)
-    _, decMax = wcs.pix2wcs(xMin, yMax)
-    decMinMax = np.array([decMin, decMax])
-    yDecAbsMax = np.array([yMin, yMax])[np.argmax(abs(decMinMax))]
-    RAMin, _ = wcs.pix2wcs(xMax, yDecAbsMax)
-    RAMax, _ = wcs.pix2wcs(xMin, yDecAbsMax)
-    clipDict = astImages.clipUsingRADecCoords(trimg[0].data[0, 0], wcs, RAMin, RAMax, decMin, decMax)
-    trimg[0].data = np.zeros([1, 1, clipDict['data'].shape[0], clipDict['data'].shape[1]])
-    trimg[0].data[0, 0] = clipDict['data']
+    if trim:
+        # Assumes N is at the top, E at the left
+        y, x = np.where(central_I >= thresh)
+        yMin, yMax = y.min(), y.max()
+        xMin, xMax = x.min(), x.max()
+        _, decMin = wcs.pix2wcs(xMax, yMin)
+        _, decMax = wcs.pix2wcs(xMin, yMax)
+        decMinMax = np.array([decMin, decMax])
+        yDecAbsMax = np.array([yMin, yMax])[np.argmax(abs(decMinMax))]
+        RAMin, _ = wcs.pix2wcs(xMax, yDecAbsMax)
+        RAMax, _ = wcs.pix2wcs(xMin, yDecAbsMax)
+        clipDict = astImages.clipUsingRADecCoords(trimg[0].data[0, 0], wcs, RAMin, RAMax, decMin, decMax)
+        trimg[0].data = np.zeros([1, 1, clipDict['data'].shape[0], clipDict['data'].shape[1]])
+        trimg[0].data[0, 0] = clipDict['data']
 
-    for i in range(1, 3):
-        for k in WCSKeys:
-            trimg[0].header['%s%d' % (k, i)]=clipDict['wcs'].header['%s%d' % (k, i)]
+        for i in range(1, 3):
+            for k in WCSKeys:
+                trimg[0].header['%s%d' % (k, i)]=clipDict['wcs'].header['%s%d' % (k, i)]
 
     return trimg
 
@@ -100,8 +123,7 @@ def calculate_widebandpb(in_image, model, model_images, nterms, band, freqAxis, 
         wcs = astWCS.WCS(tt0_img[0].header, mode='pyfits').copy()
         wcs.updateFromHeader()
         RADeg, decDeg = wcs.getCentreWCSCoords()
-        maxRDeg = 5.0
-        xDegMap, yDegMap = nemoCython.makeXYDegreesDistanceMaps(np.ones(im_shape, dtype = np.float64), wcs, RADeg, decDeg, maxRDeg)
+        xDegMap, yDegMap = makeXYDegreesDistanceMaps(np.ones(im_shape, dtype = np.float64), wcs, RADeg, decDeg)
 
         freqs = np.array(freqs, dtype=float)
         pbs = np.zeros(shape=(len(freqs),len(xDegMap)*len(yDegMap)))
@@ -212,7 +234,8 @@ def main():
         tt0_img[0].header['PBCOR'] = 'katbeam-'+katbeam.__version__
     else:
         tt0_img[0].header['PBCOR'] = model
-    tt0_img = trim_image(tt0_img, wcs, freqMHz, band, thresh)
+
+    tt0_img = trim_image(tt0_img, wcs, freqMHz, band, thresh, trim)
     outFileName = os.path.join(outDir,fileBaseName+"_"+prefix+"_tt0.fits")
     tt0_img.writeto(outFileName, overwrite = True)
 
@@ -223,15 +246,6 @@ def main():
         #Apply PB correction
         tt1_img[0].data[0,0,:,:] = (tt1_img[0].data[0,0,:,:] - pb_tt1*tt0_untrimmed[0].data[0,0,:,:])/pb_tt0
         tt1_untrimmed = copy.deepcopy(tt1_img)
-
-        # Add beam model to header and write to file
-        #if model == 'katbeam':
-        #    tt1_img[0].header['PBCOR'] = 'katbeam-'+katbeam.__version__
-        #else:
-        #    tt1_img[0].header['PBCOR'] = model
-        #tt1_img = trim_image(tt1_img, wcs, freqMHz, band, thresh)
-        #outFileName = os.path.join(outDir,fileBaseName+"_"+prefix+"_tt1.fits")
-        #tt1_img.writeto(outFileName, overwrite = True)
 
         # Create alpha image and apply PB correction
         alpha = tt1_untrimmed[0].data[0,0,:,:]/tt0_untrimmed[0].data[0,0,:,:]
@@ -245,7 +259,7 @@ def main():
         else:
             tt0_untrimmed[0].header['PBCOR'] = model
 
-        tt0_untrimmed = trim_image(tt0_untrimmed, wcs, freqMHz, band, thresh)
+        tt0_untrimmed = trim_image(tt0_untrimmed, wcs, freqMHz, band, thresh, trim)
         outFileName = os.path.join(outDir,fileBaseName+"_"+prefix+"_alpha.fits")
         tt0_untrimmed.writeto(outFileName, overwrite = True)
 
