@@ -74,10 +74,12 @@ def trim_image(trimg, wcs, beam_model, band, thresh, trim):
         trimg[0].data = np.zeros([1, 1, clipped_image.shape[0], clipped_image.shape[1]])
         trimg[0].data[0, 0] = clipped_image
 
+        oldCRPIX1 = trimg[0].header['CRPIX1']
+        oldCRPIX2 = trimg[0].header['CRPIX2']
         trimg[0].header['NAXIS1'] = clipped_image.shape[1]
         trimg[0].header['NAXIS2'] = clipped_image.shape[0]
-        trimg[0].header['CRPIX1'] = int(clipped_image.shape[1]/2)
-        trimg[0].header['CRPIX2'] = int(clipped_image.shape[0]/2)
+        trimg[0].header['CRPIX1'] = oldCRPIX1 - xMin
+        trimg[0].header['CRPIX2'] = oldCRPIX2 - yMin
 
     return trimg
 
