@@ -1,49 +1,33 @@
-# PB-correction
+# MeerKAT-widebeam
 
 This module contains several files that are all in one way or another related to correcting the effects of the primary beam on MeerKAT radio images. 
 
-## mkat_widebandpbcor.py
+## meerkat_widebandpbcor.py
 
-Calculate and apply primary beam correction for wideband data using primary beams and multiple frequencies. These can be generated using katbeam, or a series of primary beam images can be given at different frequencies. In standard mode, these are fit with the desired number of Taylor terms and applied to the corresponding Taylor term images. If the number of Taylor terms is two or more, a spectral index image is automatically generated. The procedure to do the primary beam correction is meant to emulate the procedure as it is done in the CASA [`widebandpbcor`](https://casa.nrao.edu/docs/taskref/widebandpbcor-task.html) task. If using the `wsclean_mfs` option, it's assumed the images were created using the [WSClean](https://wsclean.readthedocs.io/en/latest/) MFS imaging mode, and a weighted primary beam is created using the weights from the individual spectral windows.
+Calculate and apply primary beam correction for wideband data using primary beams and multiple frequencies. These can be generated using katbeam, or a series of primary beam images can be given at different frequencies. Several modes are supported, related to how the image was generated and the file structure. In `casa` mode, primary beams are fit with the a Taylor polynomial and applied to the corresponding Taylor term images. If the number of Taylor terms is two or more, a spectral index image is automatically generated. The procedure to do the primary beam correction is meant to emulate the procedure as it is done in the CASA [`widebandpbcor`](https://casa.nrao.edu/docs/taskref/widebandpbcor-task.html) task. If using the `wsclean` mode, it's assumed the images were created using the [WSClean](https://wsclean.readthedocs.io/en/latest/) MFS imaging mode, and a weighted primary beam is created using the weights from the individual spectral windows. The `weighted` mode assumes a weighted primary beam as well, but the frequencies and corresponding weights can be specified manually.
 
 ```
-usage: mkat_widebandpbcor.py [-h] [--wsclean_mfs] [--model MODEL]
-                             [--model_images MODEL_IMAGES [MODEL_IMAGES ...]]
-                             [--nterms NTERMS] [--write_beams]
-                             [--freqs FREQS [FREQS ...]] [-b BAND] [-t THRESH]
-                             [-T] [--alpha_thresh ALPHA_THRESH]
-                             image_name
-
 positional arguments:
-  image_name            An image to correct. Standard input assumes CASA file
-                        structure, i.e. image_name.image.tt0,
-                        image_name.image.tt1. If wsclean-mfs is set to true,
-                        wsclean output will be assumed, i.e.
+  image_name            An image to correct. In 'casa' mode CASA file
+                        structure is assumed, i.e. image_name.image.tt0,
+                        image_name.image.tt1. In 'wsclean' mode, wsclean
+                        output will be assumed, i.e.
                         imagename-0000-image.fits, imagename-0001-image.fits
                         for channel images and imagename-MFS-image.fits for
-                        the mfs image. In this case frequencies will be
-                        obtained from the channel images and the freqs option
-                        ignored.
+                        the mfs image.
+  mfs_mode              Which multi-frequency synthesis mode has been used for
+                        the image to determine the primary beam model. 'casa'
+                        assumes Taylor term imaging with casa file structure,
+                        while 'wsclean' assumes weighted imaging with a
+                        wsclean structure. 'weighted' will assume weighted
+                        imaging but without file structure, so frequencies and
+                        weights are input manually.
 
 optional arguments:
   -h, --help            show this help message and exit
-  --wsclean_mfs         Assume wsclean mfs weighting scheme instead of Taylor
-                        term images. Currently only works with katbeam model.
-  --model MODEL         Which primary beam model to use, options are katbeam,
+  -m MODEL, --model MODEL
+                        Which primary beam model to use, options are katbeam,
                         plumber, and holo(graphic) (default=katbeam).
-  --model_images MODEL_IMAGES [MODEL_IMAGES ...]
-                        If using plumber or holo model, specify files with PB
-                        images to to fit wideband primary beam.
-  --nterms NTERMS       Number of Taylor coefficients
-  --write_beams         Write derived beams to fits files (default=do not
-                        write files).
-  --freqs FREQS [FREQS ...]
-                        If using katbeam, which frequencies (in MHz) to use to
-                        generate the primary beam. The number of frequencies
-                        should be equal or greater than the number of Taylor
-                        terms, and for more accurate results should resemble
-                        the frequency structure of the data used for your
-                        imaging (default=1285)
   -b BAND, --band BAND  If using katbeam, specify band for which primary beam
                         model will be used, can be L, UHF, or S (default = L).
   -t THRESH, --threshold THRESH
@@ -53,57 +37,30 @@ optional arguments:
                         large (default=0.3).
   -T, --trim            Trim image outside valid region (set by --threshold)
                         to reduce size.
+  --model_images MODEL_IMAGES [MODEL_IMAGES ...]
+                        If using plumber or holo model, specify files with PB
+                        images to to fit wideband primary beam.
+  --freqs FREQS [FREQS ...]
+                        If using katbeam, which frequencies (in MHz) to use to
+                        generate the primary beam. If using Taylor terms, the
+                        number of frequencies should be equal or greater than
+                        the number of Taylor terms. For the most accurate
+                        results should resemble the frequency structure of the
+                        data used for imaging
+  --weights WEIGHTS [WEIGHTS ...]
+                        Weights associated with the input frequencies for a
+                        weighted primary beam
+  --nterms NTERMS       Number of Taylor coefficients
   --alpha_thresh ALPHA_THRESH
                         Mask all pixels below this flux level in the spectral
                         index image (default=0).
+  --write_beams         Write derived beams to fits files (default=do not
+                        write files).
 ```
 
-## mkat_primary_beam_correct.py
+## wideband_corrections.py
 
-This script, courtesy of Kenda Knowles, uses functionality from the [`katbeam`](https://github.com/ska-sa/katbeam) module to correct images with primary beam model from MeerKAT. Currently, L-, S-, and UHF-band are supported. The input image can be in FITS or CASA format.
-
-```
-usage: mkat_primary_beam_correct [-h] [-b BAND] [-t THRESH] [-T] image_file
-
-positional arguments:
-  image_file            An image to correct.
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -b BAND, --band BAND  Band for which primary beam model will be used, can be
-                        L, UHF, or S (default = L).
-  -t THRESH, --threshold THRESH
-                        Threshold below which image pixels will be set to
-                        blank values (nan). Use to remove areas where the
-                        primary beam correction is large.
-  -T, --trim            Trim image outside valid region (set by --threshold)
-                        to reduce size.
-```
-
-## create_alpha_primary_beam.py
-
-Creates a spectral index image from the CASA `tt0` and `tt1` images, and optionally applies primary beam correction to the images
-
-```
-usage: create_alpha_primary_beam.py [-h] [-t THRESHOLD] [--pbcor] tt0 tt1
-
-positional arguments:
-  tt0                   0th order taylor term image.
-  tt1                   1st order taylor term image.
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -t THRESHOLD, --threshold THRESHOLD
-                        Mask all pixels below this flux level.
-  --pbcor               Correct for in band spectral index from primary beam.
-                        Input should contain FWHM of the primary beam in
-                        degrees.
-```
-
-
-## alpha_flux_corrections.py
-
-Take a catalog of sources and calculates and applies residual corrections to the fluxes and spectral indices of sources. These residual corrections are necessary if the images from which they were derived had a large bandwidth.
+This script assumes a catalog created from an image that was corrected with a primary beam which did not take into account wideband effects. It takes a catalog of sources and calculates and applies residual corrections to the fluxes and spectral indices of sources, assuming a predefined spectral index. If imaging products are not available or primary beam correction in the image plane is too much of a hassle, these residual corrections can do a decent job of correcting for the effects of the wideband primary beam.
 
 ```
 usage: alpha_flux_corrections.py [-h] [-d DIST_COL]

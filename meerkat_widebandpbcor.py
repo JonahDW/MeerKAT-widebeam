@@ -4,86 +4,15 @@ import copy
 import glob
 import numpy as np
 
-import astropy.io.fits as pyfits
-import astropy.stats as apyStats
-
-import matplotlib.pyplot as plt
-
 import argparse
 from pathlib import Path
 
-import katbeam
-
 from katbeam import JimBeam
-from astLib import *
+from astLib import astWCS
 
-import casacore.images as pim
+import helpers
 
-WCSKeys=['NAXIS', 'CTYPE', 'CRPIX', 'CRVAL', 'CDELT', 'CUNIT']
-
-def open_fits_casa(file):
-    '''
-    Open an image in fits or CASA format and return the image
-    '''
-    if '.fits' in file.lower():
-        imagedata = pyfits.open(file)
-    else:
-        image = pim.image(file)
-        image.putmask(False)
-        image.tofits('temp.fits', velocity=False)
-        imagedata = pyfits.open('temp.fits')
-        # Clean up
-        os.system('rm temp.fits')
-
-    return imagedata
-
-def makeXYDegreesDistanceMaps(image, wcs, RADeg, decDeg):
-    """
-    Returns an array of distance along x, y axes in degrees from given position.
-    Inspired by original function from: https://github.com/simonsobs/nemo/blob/main/nemo/nemoCython.pyx
-    """
-    x0, y0 = wcs.wcs2pix(RADeg, decDeg)
-    ra0, dec0 = RADeg, decDeg
-    ra1, dec1 = wcs.pix2wcs(x0+1, y0+1)
-    xPixScale = astCoords.calcAngSepDeg(ra0, dec0, ra1, dec0)
-    yPixScale = astCoords.calcAngSepDeg(ra0, dec0, ra0, dec1)
-
-    Y = image.shape[0]
-    X = image.shape[1]
-
-    # Real space map of angular distance in degrees
-    xDegreesMap = np.ones([Y, X], dtype=np.float64)
-    yDegreesMap = np.ones([Y, X], dtype=np.float64)
-
-    xx, yy = np.meshgrid(np.arange(X), np.arange(Y))
-    xDegreesMap = (xx-x0)*xPixScale
-    yDegreesMap = (yy-y0)*yPixScale
-
-    return xDegreesMap, yDegreesMap
-
-def trim_image(trimg, wcs, beam_model, band, thresh, trim):
-
-    trimg[0].data[0,0][beam_model < thresh] = np.nan
-    if trim:
-        # Assumes N is at the top, E at the left
-        y, x = np.where(beam_model >= thresh)
-        yMin, yMax = y.min(), y.max()
-        xMin, xMax = x.min(), x.max()
-
-        clipped_image = trimg[0].data[0, 0, yMin:yMax, xMin:xMax]
-        trimg[0].data = np.zeros([1, 1, clipped_image.shape[0], clipped_image.shape[1]])
-        trimg[0].data[0, 0] = clipped_image
-
-        oldCRPIX1 = trimg[0].header['CRPIX1']
-        oldCRPIX2 = trimg[0].header['CRPIX2']
-        trimg[0].header['NAXIS1'] = clipped_image.shape[1]
-        trimg[0].header['NAXIS2'] = clipped_image.shape[0]
-        trimg[0].header['CRPIX1'] = oldCRPIX1 - xMin
-        trimg[0].header['CRPIX2'] = oldCRPIX2 - yMin
-
-    return trimg
-
-def calculate_beams(image, model, model_images, band, freqAxis, freqs):
+def calculate_beams(image, model, model_images, band, freqs):
     '''
     Get beams at different frequencies
     '''
@@ -100,7 +29,7 @@ def calculate_beams(image, model, model_images, band, freqAxis, freqs):
         wcs = astWCS.WCS(image[0].header, mode='pyfits').copy()
         wcs.updateFromHeader()
         RADeg, decDeg = wcs.getCentreWCSCoords()
-        xDegMap, yDegMap = makeXYDegreesDistanceMaps(np.ones(im_shape, dtype = np.float64), wcs, RADeg, decDeg)
+        xDegMap, yDegMap = helpers.makeXYDegreesDistanceMaps(np.ones(im_shape, dtype = np.float64), wcs, RADeg, decDeg)
 
         freqs = np.array(freqs, dtype=float)
         pbs = np.zeros(shape=(len(freqs),len(xDegMap)*len(yDegMap)))
@@ -113,7 +42,7 @@ def calculate_beams(image, model, model_images, band, freqAxis, freqs):
         pbs = np.zeros(shape=(len(pb_images),im_shape[0]*im_shape[1]))
         freqs = np.zeros(len(pb_images))
         for i, pb_im in enumerate(pb_images):
-            imagedata = open_fits_casa(pb_im)
+            imagedata = helpers.open_fits_casa(pb_im)
             pbs[i,:] = imagedata[0].data[0,0].flatten()
             freqs[i] = float(pb_im.split('_')[-1].split('M')[0])
 
@@ -123,7 +52,7 @@ def calculate_beams(image, model, model_images, band, freqAxis, freqs):
         pbs = np.zeros(shape=(len(pb_images),im_shape[0]*im_shape[1]))
         freqs = np.zeros(len(pb_images))
         for i, pb_im in enumerate(pb_images):
-            imagedata = open_fits_casa(pb_im)
+            imagedata = helpers.open_fits_casa(pb_im)
 
             pbs[i,:] = imagedata[0].data[0,0].flatten()
             freqs[i] = (imagedata[0].header['CRVAL3']-imagedata[0].header['CRPIX3']*imagedata[0].header['CDELT3'])/1e6 #MHz
@@ -139,7 +68,7 @@ def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, fr
     '''
     Calculate the wideband PB correction for CASA images
     '''
-    tt0_img = open_fits_casa(in_image+'.image.tt0')
+    tt0_img = helpers.open_fits_casa(in_image+'.image.tt0')
     wcs = astWCS.WCS(tt0_img[0].header, mode='pyfits').copy()
     wcs.updateFromHeader()
 
@@ -148,7 +77,7 @@ def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, fr
 
     # Get primary beam models
     pbs, freqs = calculate_beams(tt0_img, model, model_images,
-                                 band, freqAxis, freqs)
+                                 band, freqs)
 
     y = pbs
     x = (freqs-cfreq)/cfreq
@@ -162,21 +91,18 @@ def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, fr
     tt0_img[0].data[0,0,:,:] = tt0_img[0].data[0,0,:,:]/pb_tt0
     tt0_untrimmed = copy.deepcopy(tt0_img)
 
-    # Add beam model to header and write to file
-    if model == 'katbeam':
-        tt0_img[0].header['PBCOR'] = 'katbeam-'+katbeam.__version__
-    else:
-        tt0_img[0].header['PBCOR'] = model
+    tt0_img[0].data[0, 0][pb_tt0 < thresh] = np.nan
+    if trim:
+        tt0_img = helpers.trim_image(tt0_img, pb_tt0, thresh, trim)
+    helpers.write_image_fits(tt0_img, in_image+'_pbcorr_tt0', model)
 
-    tt0_img = trim_image(tt0_img, wcs, pb_tt0, band, thresh, trim)
-    tt0_img.writeto(in_image+'_pbcorr_tt0.fits', overwrite = True)
     if write_beams:
         # Write PB images
         temp_img[0].data[0,0,:,:] = pb_tt0
-        temp_img.writeto('pb_tt0.fits', overwrite=True)
+        helpers.write_image_fits(temp_img, 'pb_tt0', model)
 
     if nterms > 1:
-        tt1_img = open_fits_casa(in_image+'.image.tt1')
+        tt1_img = helpers.open_fits_casa(in_image+'.image.tt1')
         pb_tt1 = pb_polyfit[1,:].reshape(tt1_img[0].data.shape[2],tt1_img[0].data.shape[3])
 
         #Apply PB correction
@@ -190,26 +116,22 @@ def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, fr
 
         # Open image so fits data structure is already there
         tt0_untrimmed[0].data[0,0,:,:] = alpha
-        if model == 'katbeam':
-            tt0_untrimmed[0].header['PBCOR'] = 'katbeam-'+katbeam.__version__
-        else:
-            tt0_untrimmed[0].header['PBCOR'] = model
-
-        tt0_untrimmed = trim_image(tt0_untrimmed, wcs, pb_tt0, band, thresh, trim)
-        tt0_untrimmed.writeto(in_image+'_pbcorr_alpha.fits', overwrite = True)
+        if trim:
+            tt0_untrimmed = helpers.trim_image(tt0_untrimmed, pb_tt0, thresh, trim)
+        helpers.write_image_fits(tt0_untrimmed, in_image+'_pbcorr_alpha', model)
 
         if write_beams:
             temp_img[0].data[0,0,:,:] = pb_tt1
-            temp_img.writeto('pb_tt1.fits', overwrite=True)
+            helpers.write_image_fits(temp_img, 'pb_alpha', model)
 
             temp_img[0].data[0,0,:,:] = pb_tt1 / pb_tt0
-            temp_img.writeto('pb_alpha.fits', overwrite=True)
+            helpers.write_image_fits(temp_img, 'pb_alpha', model)
 
 def wsclean_widebandpbcor(in_image, model, model_images, band, freqAxis, thresh, trim, write_beams):
     '''
     Calculate the wideband PB correction for WSClean images
     '''
-    mfs_img = open_fits_casa(in_image+'-MFS-image.fits')
+    mfs_img = helpers.open_fits_casa(in_image+'-MFS-image.fits')
     wcs = astWCS.WCS(mfs_img[0].header, mode='pyfits').copy()
     wcs.updateFromHeader()
 
@@ -220,7 +142,7 @@ def wsclean_widebandpbcor(in_image, model, model_images, band, freqAxis, thresh,
     weights = []
     spw_images = sorted(glob.glob(in_image+'-0*-image.fits'))
     for spw_im_file in spw_images:
-        spw_im = open_fits_casa(spw_im_file)
+        spw_im = helpers.open_fits_casa(spw_im_file)
 
         freq = spw_im[0].header['CRVAL3']/1e6 #MHz
         weight = 1/spw_im[0].header['WSCIMGWG']*1e9
@@ -237,19 +159,47 @@ def wsclean_widebandpbcor(in_image, model, model_images, band, freqAxis, thresh,
     mfs_pb = np.average(pbs, axis=0, weights=weights)
     mfs_pb = mfs_pb.reshape(img_shape)
     mfs_img[0].data[0,0,:,:] = mfs_img[0].data[0,0,:,:]/mfs_pb
-
-    # Add beam model to header and write to file
-    if model == 'katbeam':
-        mfs_img[0].header['PBCOR'] = 'katbeam-'+katbeam.__version__
-    else:
-        mfs_img[0].header['PBCOR'] = model
-    mfs_img = trim_image(mfs_img, wcs, mfs_pb, band, thresh, trim)
-    mfs_img.writeto(in_image+'-MFS-pbcor-image.fits', overwrite = True)
+    mfs_img[0].data[0, 0][mfs_pb < thresh] = np.nan
+    if trim:
+        mfs_img = helpers.trim_image(mfs_img, mfs_pb, thresh, trim)
+    helpers.write_image_fits(mfs_img, in_image+'-MFS-pbcor-image', model)
 
     if write_beams:
         # Write PB images
         temp_img[0].data[0,0,:,:] = mfs_pb
-        temp_img.writeto('mfs_pb.fits', overwrite=True)
+        helpers.write_image_fits(temp_img, 'mfs_pb', model)
+
+def weighted_widebandpbcor(in_image, model, model_images, band, freqs, weights, thresh, trim, write_beams):
+    '''
+    Calculate the wideband PB correction for WSClean images
+    '''
+    mfs_img = helpers.open_fits_casa(in_image)
+    image_name = in_image.rsplit('.',1)[0]
+
+    wcs = astWCS.WCS(mfs_img[0].header, mode='pyfits').copy()
+    wcs.updateFromHeader()
+
+    img_shape = np.squeeze(mfs_img[0].data).shape
+    temp_img = copy.deepcopy(mfs_img)
+
+    # Get primary beam models
+    pbs, freqs = calculate_beams(mfs_img, model, model_images,
+                                 band, freqs)
+
+    weights = np.array(weights).astype(float)
+    mfs_pb = np.average(pbs, axis=0, weights=weights)
+    mfs_pb = mfs_pb.reshape(img_shape)
+
+    mfs_img[0].data[0,0,:,:] = mfs_img[0].data[0,0,:,:]/mfs_pb
+    mfs_img[0].data[0, 0][mfs_pb < thresh] = np.nan
+    if trim:
+        mfs_img = helpers.trim_image(mfs_img, mfs_pb, thresh, trim)
+    helpers.write_image_fits(mfs_img, image_name+'-pbcor', model)
+
+    if write_beams:
+        # Write PB images
+        temp_img[0].data[0,0,:,:] = mfs_pb
+        helpers.write_image_fits(temp_img, 'mfs_pb', model)
 
 def main():
 
@@ -257,25 +207,28 @@ def main():
     args = parser.parse_args()
 
     in_image = args.image_name
-    wsclean_mfs = args.wsclean_mfs
+    mfs_mode = args.mfs_mode
     model = args.model
-    model_images = args.model_images
-    nterms = args.nterms
-    write_beams = args.write_beams
-    freqs = args.freqs
     band = args.band
     thresh = args.thresh
     trim = args.trim
+    model_images = args.model_images
+    freqs = args.freqs
+    weights = args.weights
+    nterms = args.nterms
     alpha_thresh = args.alpha_thresh
+    write_beams = args.write_beams
 
     # Open mfs image for header information
-    if wsclean_mfs:
+    if mfs_mode.lower() == 'wsclean':
         mfs_image_file = in_image+'-MFS-image.fits'
-    else:
+    elif mfs_mode.lower() == 'casa':
         mfs_image_file = in_image+'.image.tt0'
+    else:
+        mfs_image_file = in_image
 
     if os.path.isfile(mfs_image_file):
-        mfs_img = open_fits_casa(mfs_image_file)
+        mfs_img = helpers.open_fits_casa(mfs_image_file)
     else:
         print(f'Input image {mfs_image_file} not found')
         sys.exit(0)
@@ -292,16 +245,10 @@ def main():
     assert(polAxis is not None and freqAxis is not None)
     freqMHz = mfs_img[0].header['CRVAL%d' % (freqAxis)]/1e6
 
-    wcs = astWCS.WCS(mfs_img[0].header, mode='pyfits').copy()
-    wcs.updateFromHeader()
-
     print("Image central Frequency = %.3f MHz" % (freqMHz))
     print("Selected %s-band" % band.upper())
 
-    if wsclean_mfs:
-        wsclean_widebandpbcor(in_image, model, model_images, 
-                              band, freqAxis, thresh, trim, write_beams)
-    else:
+    if mfs_mode.lower() == 'casa':
         if model == 'katbeam' and len(freqs) < nterms:
             print('Number of frequencies is lower than number of Taylor terms, fit cannot be performed')
             sys.exit()
@@ -309,33 +256,44 @@ def main():
                            nterms, band, freqAxis, freqs, 
                            thresh, trim,  write_beams)
 
+    # In wsclean, determine frequencies and weights of channels
+    if mfs_mode.lower() == 'wsclean':
+        freqs = []
+        weights = []
+        spw_images = sorted(glob.glob(in_image+'-0*-image.fits'))
+        for spw_im_file in spw_images:
+            spw_im = helpers.open_fits_casa(spw_im_file)
+
+            freq = spw_im[0].header['CRVAL'+str(freqAxis)]/1e6 #MHz
+            weight = 1/spw_im[0].header['WSCIMGWG']*1e9
+
+            freqs.append(freq)
+            weights.append(weight)
+
+    if mfs_mode.lower() == 'wsclean' or mfs_mode.lower() == 'weighted' :
+        assert len(freqs) == len(weights), "Different lengths of frequencies and weights"
+
+        weighted_widebandpbcor(mfs_image_file, model, model_images,
+                               band, freqs, weights,
+                               thresh, trim, write_beams)
+
 def new_argument_parser():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("image_name", type=str, help="""An image to correct. Standard input assumes 
-                        CASA file structure, i.e. image_name.image.tt0, image_name.image.tt1.
-                        If wsclean-mfs is set to true, wsclean output will be assumed, i.e. 
-                        imagename-0000-image.fits, imagename-0001-image.fits for channel images
-                        and imagename-MFS-image.fits for the mfs image. In this case frequencies 
-                        will be obtained from the channel images and the freqs option ignored.""")
-    parser.add_argument("--wsclean_mfs", action='store_true',
-                        help="""Assume wsclean mfs weighting scheme instead of Taylor term images.
-                                Currently only works with katbeam model.""")
-    parser.add_argument("--model", type=str, default="katbeam",
+    parser.add_argument("image_name", type=str, help="""An image to correct. In 'casa' mode 
+                        CASA file structure is assumed, i.e. image_name.image.tt0, image_name.image.tt1.
+                        In 'wsclean' mode, wsclean output will be assumed, i.e. imagename-0000-image.fits,
+                        imagename-0001-image.fits for channel images and imagename-MFS-image.fits for
+                        the mfs image.""")
+    parser.add_argument("mfs_mode", type=str, help="""Which multi-frequency synthesis mode has been used
+                        for the image to determine the primary beam model. 'casa' assumes Taylor term
+                        imaging with casa file structure, while 'wsclean' assumes weighted imaging with
+                        a wsclean structure. 'weighted' will assume weighted imaging but without file
+                        structure, so frequencies and weights are input manually.""")
+    parser.add_argument("-m", "--model", type=str, default="katbeam",
                         help="""Which primary beam model to use, options are katbeam, plumber, 
                                 and holo(graphic) (default=katbeam).""")
-    parser.add_argument("--model_images", nargs='+', default=None,
-                        help="""If using plumber or holo model, specify files with PB images to 
-                                to fit wideband primary beam.""")
-    parser.add_argument("--nterms", default=2, type=int, help="Number of Taylor coefficients")
-    parser.add_argument("--write_beams", action='store_true',
-                        help="""Write derived beams to fits files (default=do not write files).""")
-    parser.add_argument("--freqs", nargs='+', default=1285,
-                        help="""If using katbeam, which frequencies (in MHz) to use to generate the primary beam.
-                                The number of frequencies should be equal or greater than the number of Taylor terms,
-                                and for more accurate results should resemble the frequency structure of the data
-                                used for your imaging (default=1285)""")
     parser.add_argument("-b", "--band", dest="band", default="L", help="""If using katbeam, specify band 
                             for which primary beam model will be used, can be L, UHF, or S (default = L).""")
     parser.add_argument("-t", "--threshold", dest="thresh", default=0.3, type=float,
@@ -344,8 +302,21 @@ def new_argument_parser():
                                 correction is large (default=0.3).""")
     parser.add_argument("-T", "--trim", dest="trim", help="""Trim image outside valid region (set by
                         --threshold) to reduce size.""", default=False, action='store_true')
+    parser.add_argument("--model_images", nargs='+', default=None,
+                        help="""If using plumber or holo model, specify files with PB images to 
+                                to fit wideband primary beam.""")
+    parser.add_argument("--freqs", nargs='+', default=None,
+                        help="""If using katbeam, which frequencies (in MHz) to use to generate the primary beam.
+                        If using Taylor terms, the number of frequencies should be equal or greater than the number 
+                        of Taylor terms. For the most accurate results should resemble the frequency structure of 
+                        the data used for imaging""")
+    parser.add_argument("--weights", nargs='+', default=None,
+                        help="""Weights associated with the input frequencies for a weighted primary beam""")
+    parser.add_argument("--nterms", default=2, type=int, help="Number of Taylor coefficients")
     parser.add_argument("--alpha_thresh", default=0, type=float,
                         help="""Mask all pixels below this flux level in the spectral index image (default=0).""")
+    parser.add_argument("--write_beams", action='store_true',
+                        help="""Write derived beams to fits files (default=do not write files).""")
 
     return parser
 
