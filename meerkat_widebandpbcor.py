@@ -36,26 +36,14 @@ def calculate_beams(image, model, model_images, band, freqs):
         for i, freqMHz in enumerate(freqs):
             pbs[i,:] = beam.I(xDegMap, yDegMap, freqMHz).flatten()
 
-    if model == 'plumber':
+    if model == 'images':
         pb_images = model_images
 
         pbs = np.zeros(shape=(len(pb_images),im_shape[0]*im_shape[1]))
-        freqs = np.zeros(len(pb_images))
+        freqs = np.array(freqs, dtype=float)
         for i, pb_im in enumerate(pb_images):
             imagedata = helpers.open_fits_casa(pb_im)
-            pbs[i,:] = imagedata[0].data[0,0].flatten()
-            freqs[i] = float(pb_im.split('_')[-1].split('M')[0])
-
-    if model == 'holo':
-        pb_images = model_images
-
-        pbs = np.zeros(shape=(len(pb_images),im_shape[0]*im_shape[1]))
-        freqs = np.zeros(len(pb_images))
-        for i, pb_im in enumerate(pb_images):
-            imagedata = helpers.open_fits_casa(pb_im)
-
-            pbs[i,:] = imagedata[0].data[0,0].flatten()
-            freqs[i] = (imagedata[0].header['CRVAL3']-imagedata[0].header['CRPIX3']*imagedata[0].header['CDELT3'])/1e6 #MHz
+            pbs[i,:] = np.squeeze(imagedata[0].data).flatten()
 
     # Make sure frequencies are sorted
     sorted_freq = freqs.argsort()
@@ -127,51 +115,9 @@ def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, fr
             temp_img[0].data[0,0,:,:] = pb_tt1 / pb_tt0
             helpers.write_image_fits(temp_img, 'pb_alpha', model)
 
-def wsclean_widebandpbcor(in_image, model, model_images, band, freqAxis, thresh, trim, write_beams):
-    '''
-    Calculate the wideband PB correction for WSClean images
-    '''
-    mfs_img = helpers.open_fits_casa(in_image+'-MFS-image.fits')
-    wcs = astWCS.WCS(mfs_img[0].header, mode='pyfits').copy()
-    wcs.updateFromHeader()
-
-    img_shape = np.squeeze(mfs_img[0].data).shape
-    temp_img = copy.deepcopy(mfs_img)
-
-    freqs = []
-    weights = []
-    spw_images = sorted(glob.glob(in_image+'-0*-image.fits'))
-    for spw_im_file in spw_images:
-        spw_im = helpers.open_fits_casa(spw_im_file)
-
-        freq = spw_im[0].header['CRVAL3']/1e6 #MHz
-        weight = 1/spw_im[0].header['WSCIMGWG']*1e9
-
-        print(freq, weight)
-
-        freqs.append(freq)
-        weights.append(weight)
-
-    # Get primary beam models
-    pbs, freqs = calculate_beams(mfs_img, model, model_images,
-                                 band, freqAxis, freqs)
-
-    mfs_pb = np.average(pbs, axis=0, weights=weights)
-    mfs_pb = mfs_pb.reshape(img_shape)
-    mfs_img[0].data[0,0,:,:] = mfs_img[0].data[0,0,:,:]/mfs_pb
-    mfs_img[0].data[0, 0][mfs_pb < thresh] = np.nan
-    if trim:
-        mfs_img = helpers.trim_image(mfs_img, mfs_pb, thresh, trim)
-    helpers.write_image_fits(mfs_img, in_image+'-MFS-pbcor-image', model)
-
-    if write_beams:
-        # Write PB images
-        temp_img[0].data[0,0,:,:] = mfs_pb
-        helpers.write_image_fits(temp_img, 'mfs_pb', model)
-
 def weighted_widebandpbcor(in_image, model, model_images, band, freqs, weights, thresh, trim, write_beams):
     '''
-    Calculate the wideband PB correction for WSClean images
+    Calculate the wideband PB correction with weighted images
     '''
     mfs_img = helpers.open_fits_casa(in_image)
     image_name = in_image.rsplit('.',1)[0]
@@ -249,7 +195,7 @@ def main():
     print("Selected %s-band" % band.upper())
 
     if mfs_mode.lower() == 'casa':
-        if model == 'katbeam' and len(freqs) < nterms:
+        if len(freqs) < nterms:
             print('Number of frequencies is lower than number of Taylor terms, fit cannot be performed')
             sys.exit()
         casa_widebandpbcor(in_image, model, model_images, 
@@ -266,6 +212,7 @@ def main():
 
             freq = spw_im[0].header['CRVAL'+str(freqAxis)]/1e6 #MHz
             weight = 1/spw_im[0].header['WSCIMGWG']*1e9
+            print(freq, weight)
 
             freqs.append(freq)
             weights.append(weight)
@@ -274,8 +221,7 @@ def main():
         assert len(freqs) == len(weights), "Different lengths of frequencies and weights"
 
         weighted_widebandpbcor(mfs_image_file, model, model_images,
-                               band, freqs, weights,
-                               thresh, trim, write_beams)
+                               band, freqs, weights, thresh, trim, write_beams)
 
 def new_argument_parser():
 
@@ -292,8 +238,8 @@ def new_argument_parser():
                         a wsclean structure. 'weighted' will assume weighted imaging but without file
                         structure, so frequencies and weights are input manually.""")
     parser.add_argument("-m", "--model", type=str, default="katbeam",
-                        help="""Which primary beam model to use, options are katbeam, plumber, 
-                                and holo(graphic) (default=katbeam).""")
+                        help="""Which primary beam model to use, options are 'katbeam' or 'images', in the latter
+                                case input images must be specified by model_images parameter (default=katbeam).""")
     parser.add_argument("-b", "--band", dest="band", default="L", help="""If using katbeam, specify band 
                             for which primary beam model will be used, can be L, UHF, or S (default = L).""")
     parser.add_argument("-t", "--threshold", dest="thresh", default=0.3, type=float,
@@ -303,12 +249,13 @@ def new_argument_parser():
     parser.add_argument("-T", "--trim", dest="trim", help="""Trim image outside valid region (set by
                         --threshold) to reduce size.""", default=False, action='store_true')
     parser.add_argument("--model_images", nargs='+', default=None,
-                        help="""If using plumber or holo model, specify files with PB images to 
-                                to fit wideband primary beam.""")
+                        help="""Specify files with PB images to to fit wideband primary beam. Corresponding
+                                frequencies must be given with the freqs parameter.""")
     parser.add_argument("--freqs", nargs='+', default=None,
-                        help="""If using katbeam, which frequencies (in MHz) to use to generate the primary beam.
-                        If using Taylor terms, the number of frequencies should be equal or greater than the number 
-                        of Taylor terms. For the most accurate results should resemble the frequency structure of 
+                        help="""Frequencies (in MHz) to use to generate the primary beam (katbeam) or frequencies
+                        corresponding to input model images (images). If using Taylor terms, the number of 
+                        frequencies should be equal or greater than the number of Taylor terms. 
+                        For the most accurate results should resemble the frequency structure of 
                         the data used for imaging""")
     parser.add_argument("--weights", nargs='+', default=None,
                         help="""Weights associated with the input frequencies for a weighted primary beam""")

@@ -7,6 +7,14 @@ This module contains several files that are all in one way or another related to
 Calculate and apply primary beam correction for wideband data using primary beams and multiple frequencies. These can be generated using katbeam, or a series of primary beam images can be given at different frequencies. Several modes are supported, related to how the image was generated and the file structure. In `casa` mode, primary beams are fit with the a Taylor polynomial and applied to the corresponding Taylor term images. If the number of Taylor terms is two or more, a spectral index image is automatically generated. The procedure to do the primary beam correction is meant to emulate the procedure as it is done in the CASA [`widebandpbcor`](https://casa.nrao.edu/docs/taskref/widebandpbcor-task.html) task. If using the `wsclean` mode, it's assumed the images were created using the [WSClean](https://wsclean.readthedocs.io/en/latest/) MFS imaging mode, and a weighted primary beam is created using the weights from the individual spectral windows. The `weighted` mode assumes a weighted primary beam as well, but the frequencies and corresponding weights can be specified manually.
 
 ```
+usage: meerkat_widebandpbcor.py [-h] [-m MODEL] [-b BAND] [-t THRESH] [-T]
+                                [--model_images MODEL_IMAGES [MODEL_IMAGES ...]]
+                                [--freqs FREQS [FREQS ...]]
+                                [--weights WEIGHTS [WEIGHTS ...]]
+                                [--nterms NTERMS]
+                                [--alpha_thresh ALPHA_THRESH] [--write_beams]
+                                image_name mfs_mode
+
 positional arguments:
   image_name            An image to correct. In 'casa' mode CASA file
                         structure is assumed, i.e. image_name.image.tt0,
@@ -26,8 +34,9 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   -m MODEL, --model MODEL
-                        Which primary beam model to use, options are katbeam,
-                        plumber, and holo(graphic) (default=katbeam).
+                        Which primary beam model to use, options are 'katbeam'
+                        or 'images', in the latter case input images must be
+                        specified by model_images parameter (default=katbeam).
   -b BAND, --band BAND  If using katbeam, specify band for which primary beam
                         model will be used, can be L, UHF, or S (default = L).
   -t THRESH, --threshold THRESH
@@ -38,11 +47,13 @@ optional arguments:
   -T, --trim            Trim image outside valid region (set by --threshold)
                         to reduce size.
   --model_images MODEL_IMAGES [MODEL_IMAGES ...]
-                        If using plumber or holo model, specify files with PB
-                        images to to fit wideband primary beam.
+                        Specify files with PB images to to fit wideband
+                        primary beam. Corresponding frequencies must be given
+                        with the freqs parameter.
   --freqs FREQS [FREQS ...]
-                        If using katbeam, which frequencies (in MHz) to use to
-                        generate the primary beam. If using Taylor terms, the
+                        Frequencies (in MHz) to use to generate the primary
+                        beam (katbeam) or frequencies corresponding to input
+                        model images (images). If using Taylor terms, the
                         number of frequencies should be equal or greater than
                         the number of Taylor terms. For the most accurate
                         results should resemble the frequency structure of the
@@ -56,6 +67,31 @@ optional arguments:
                         index image (default=0).
   --write_beams         Write derived beams to fits files (default=do not
                         write files).
+```
+
+## make_holo_beams.py
+
+Script to create MeerKAT holographic primary beam models for different frequencies and polarisations based on data from [de Villiers (2023)](https://archive-gw-1.kat.ac.za/public/repository/10.48479/wdb0-h061/index.html).
+
+```
+usage: make_holo_beams.py [-h] [--freqs FREQS [FREQS ...]] [--outdir OUTDIR]
+                          [--stokes STOKES [STOKES ...]] [--cell CELL]
+                          [--imsize IMSIZE]
+                          holodir
+
+positional arguments:
+  holodir               Directory containing holographic images, assuming npz
+                        format from data by de Villiers (2023).
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --freqs FREQS [FREQS ...]
+                        Frequencies of output images, in MHz.
+  --outdir OUTDIR       Output directory of images.
+  --stokes STOKES [STOKES ...]
+                        Beam polarization(s).
+  --cell CELL           Cell size, in arcsec.
+  --imsize IMSIZE       Image size, in pixels
 ```
 
 ## wideband_corrections.py
