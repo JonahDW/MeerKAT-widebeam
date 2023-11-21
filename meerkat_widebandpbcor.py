@@ -52,10 +52,15 @@ def calculate_beams(image, model, model_images, band, freqs):
 
     return pbs, freqs
 
-def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, freqs, thresh, trim, write_beams):
+def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, freqs, thresh, trim, write_beams, outdir):
     '''
     Calculate the wideband PB correction for CASA images
     '''
+    imagename = os.path.basename(in_image)
+    if outdir is None:
+        outdir = os.path.dirname(in_image)
+    out_image = os.path.join(outdir, imagename)
+
     tt0_img = helpers.open_fits_casa(in_image+'.image.tt0')
     wcs = WCS(tt0_img[0].header).copy()
 
@@ -81,7 +86,7 @@ def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, fr
     tt0_img[0].data[0, 0][pb_tt0 < thresh] = np.nan
     if trim:
         tt0_img = helpers.trim_image(tt0_img, pb_tt0, thresh, trim)
-    helpers.write_image_fits(tt0_img, in_image+'_pbcorr_tt0', model)
+    helpers.write_image_fits(tt0_img, out_image+'_pbcorr_tt0', model)
 
     if write_beams:
         # Write PB images
@@ -105,7 +110,7 @@ def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, fr
         tt0_untrimmed[0].data[0,0,:,:] = alpha
         if trim:
             tt0_untrimmed = helpers.trim_image(tt0_untrimmed, pb_tt0, thresh, trim)
-        helpers.write_image_fits(tt0_untrimmed, in_image+'_pbcorr_alpha', model)
+        helpers.write_image_fits(tt0_untrimmed, out_image+'_pbcorr_alpha', model)
 
         if write_beams:
             temp_img[0].data[0,0,:,:] = pb_tt1
@@ -114,13 +119,16 @@ def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, fr
             temp_img[0].data[0,0,:,:] = pb_tt1 / pb_tt0
             helpers.write_image_fits(temp_img, 'pb_alpha', model)
 
-def weighted_widebandpbcor(in_image, model, model_images, band, freqs, weights, thresh, trim, write_beams):
+def weighted_widebandpbcor(in_image, model, model_images, band, freqs, weights, thresh, trim, write_beams, outdir):
     '''
     Calculate the wideband PB correction with weighted images
     '''
-    mfs_img = helpers.open_fits_casa(in_image)
-    image_name = in_image.rsplit('.',1)[0]
+    imagename = os.path.basename(in_image.rsplit('.',1)[0])
+    if outdir is None:
+        outdir = os.path.dirname(in_image)
+    out_image = os.path.join(outdir, imagename)
 
+    mfs_img = helpers.open_fits_casa(in_image)
     wcs = WCS(mfs_img[0].header).copy()
 
     img_shape = np.squeeze(mfs_img[0].data).shape
@@ -138,7 +146,7 @@ def weighted_widebandpbcor(in_image, model, model_images, band, freqs, weights, 
     mfs_img[0].data[0, 0][mfs_pb < thresh] = np.nan
     if trim:
         mfs_img = helpers.trim_image(mfs_img, mfs_pb, thresh, trim)
-    helpers.write_image_fits(mfs_img, image_name+'-pbcor', model)
+    helpers.write_image_fits(mfs_img, out_image+'-pbcor', model)
 
     if write_beams:
         # Write PB images
@@ -162,6 +170,7 @@ def main():
     nterms = args.nterms
     alpha_thresh = args.alpha_thresh
     write_beams = args.write_beams
+    outdir = args.outdir
 
     # Open mfs image for header information
     if mfs_mode.lower() == 'wsclean':
@@ -198,7 +207,7 @@ def main():
             sys.exit()
         casa_widebandpbcor(in_image, model, model_images, 
                            nterms, band, freqAxis, freqs, 
-                           thresh, trim,  write_beams)
+                           thresh, trim,  write_beams, outdir)
 
     # In wsclean, determine frequencies and weights of channels
     if mfs_mode.lower() == 'wsclean':
@@ -219,7 +228,7 @@ def main():
         assert len(freqs) == len(weights), "Different lengths of frequencies and weights"
 
         weighted_widebandpbcor(mfs_image_file, model, model_images,
-                               band, freqs, weights, thresh, trim, write_beams)
+                               band, freqs, weights, thresh, trim, write_beams, outdir)
 
 def new_argument_parser():
 
@@ -262,6 +271,7 @@ def new_argument_parser():
                         help="""Mask all pixels below this flux level in the spectral index image (default=0).""")
     parser.add_argument("--write_beams", action='store_true',
                         help="""Write derived beams to fits files (default=do not write files).""")
+    parser.add_argument("--outdir", default=None, type=str, help="Output directory of images.")
 
     return parser
 
