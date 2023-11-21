@@ -2,7 +2,7 @@ import numpy as np
 
 import casacore.images as pim
 from astropy.io import fits
-from astLib import astCoords
+from astropy.coordinates import angular_separation
 
 import katbeam
 
@@ -27,11 +27,11 @@ def makeXYDegreesDistanceMaps(image, wcs, RADeg, decDeg):
     Returns an array of distance along x, y axes in degrees from given position.
     Inspired by original function from: https://github.com/simonsobs/nemo/blob/main/nemo/nemoCython.pyx
     """
-    x0, y0 = wcs.wcs2pix(RADeg, decDeg)
+    x0, y0 = wcs.all_world2pix(RADeg, decDeg)
     ra0, dec0 = RADeg, decDeg
-    ra1, dec1 = wcs.pix2wcs(x0+1, y0+1)
-    xPixScale = astCoords.calcAngSepDeg(ra0, dec0, ra1, dec0)
-    yPixScale = astCoords.calcAngSepDeg(ra0, dec0, ra0, dec1)
+    ra1, dec1 = wcs.all_pix2world(x0+1, y0+1)
+    xPixScale = angular_separation(ra0, dec0, ra1, dec0)
+    yPixScale = angular_separation(ra0, dec0, ra0, dec1)
 
     Y = image.shape[0]
     X = image.shape[1]

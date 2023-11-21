@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 
 from katbeam import JimBeam
-from astLib import astWCS
+from astropy.wcs import WCS
 
 import helpers
 
@@ -26,9 +26,9 @@ def calculate_beams(image, model, model_images, band, freqs):
             sys.exit()
 
         # Get coordinates from image header and create coordinate map
-        wcs = astWCS.WCS(image[0].header, mode='pyfits').copy()
-        wcs.updateFromHeader()
-        RADeg, decDeg = wcs.getCentreWCSCoords()
+        wcs = WCS(image[0].header).copy()
+        RADeg = image[0].header['CRVAL1']
+        decDeg = image[0].header['CRVAL2']
         xDegMap, yDegMap = helpers.makeXYDegreesDistanceMaps(np.ones(im_shape, dtype = np.float64), wcs, RADeg, decDeg)
 
         freqs = np.array(freqs, dtype=float)
@@ -57,8 +57,7 @@ def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, fr
     Calculate the wideband PB correction for CASA images
     '''
     tt0_img = helpers.open_fits_casa(in_image+'.image.tt0')
-    wcs = astWCS.WCS(tt0_img[0].header, mode='pyfits').copy()
-    wcs.updateFromHeader()
+    wcs = WCS(tt0_img[0].header).copy()
 
     temp_img = tt0_img
     cfreq = tt0_img[0].header['CRVAL'+str(freqAxis)]/1e6 #MHz
@@ -122,8 +121,7 @@ def weighted_widebandpbcor(in_image, model, model_images, band, freqs, weights, 
     mfs_img = helpers.open_fits_casa(in_image)
     image_name = in_image.rsplit('.',1)[0]
 
-    wcs = astWCS.WCS(mfs_img[0].header, mode='pyfits').copy()
-    wcs.updateFromHeader()
+    wcs = WCS(mfs_img[0].header).copy()
 
     img_shape = np.squeeze(mfs_img[0].data).shape
     temp_img = copy.deepcopy(mfs_img)
