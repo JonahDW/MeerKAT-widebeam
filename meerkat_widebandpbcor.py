@@ -21,12 +21,13 @@ def calculate_beams(image, model, model_images, band, freqs):
     if model == 'katbeam':
         try:
             beam = JimBeam('MKAT-AA-%s-JIM-2020' % band.upper())
+            print("Selected katbeam %s-band" % band.upper())
         except ValueError:
             print('Band selected not recognized, check input carefully')
             sys.exit()
 
         # Get coordinates from image header and create coordinate map
-        wcs = WCS(image[0].header).copy()
+        wcs = WCS(image[0].header, naxis=2).copy()
         RADeg = image[0].header['CRVAL1']
         decDeg = image[0].header['CRVAL2']
         xDegMap, yDegMap = helpers.makeXYDegreesDistanceMaps(np.ones(im_shape, dtype = np.float64), wcs, RADeg, decDeg)
@@ -199,7 +200,6 @@ def main():
     freqMHz = mfs_img[0].header['CRVAL%d' % (freqAxis)]/1e6
 
     print("Image central Frequency = %.3f MHz" % (freqMHz))
-    print("Selected %s-band" % band.upper())
 
     if mfs_mode.lower() == 'casa':
         if len(freqs) < nterms:
