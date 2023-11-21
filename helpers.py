@@ -3,7 +3,6 @@ import numpy as np
 import casacore.images as pim
 from astropy.io import fits
 from astropy.coordinates import angular_separation, SkyCoord
-from astLib import astCoords
 
 import katbeam
 
