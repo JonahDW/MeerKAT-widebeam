@@ -86,6 +86,7 @@ def main():
             hdu = fits.PrimaryHDU(scaled_beam)
             hdul = fits.HDUList([hdu])
             outfile = os.path.join(outdir, f'{stoke}_{in_freqs[nearest_freq]:.2f}MHz.fits')
+            print(f"--> Saving beam image '{outfile}'")
             hdul.writeto(outfile, overwrite=True)
 
 def new_argument_parser():

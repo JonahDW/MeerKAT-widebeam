@@ -38,8 +38,9 @@ def calculate_beams(image, model, model_images, band, freqs):
             pbs[i,:] = beam.I(xDegMap, yDegMap, freqMHz).flatten()
 
     if model == 'images':
-        pb_images = model_images
+        assert len(freqs) == len(model_images), "Different number of frequencies and model images!"
 
+        pb_images = model_images
         pbs = np.zeros(shape=(len(pb_images),im_shape[0]*im_shape[1]))
         freqs = np.array(freqs, dtype=float)
         for i, pb_im in enumerate(pb_images):
@@ -87,11 +88,13 @@ def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, fr
     tt0_img[0].data[0, 0][pb_tt0 < thresh] = np.nan
     if trim:
         tt0_img = helpers.trim_image(tt0_img, pb_tt0, thresh, trim)
+    print(f"--> Saving primary beam corrected image '{out_image+'_pbcorr_tt0.fits'}'")
     helpers.write_image_fits(tt0_img, out_image+'_pbcorr_tt0', model)
 
     if write_beams:
         # Write PB images
         temp_img[0].data[0,0,:,:] = pb_tt0
+        print(f"--> Saving tt0 primary beam 'pb_tt0.fits'")
         helpers.write_image_fits(temp_img, 'pb_tt0', model)
 
     if nterms > 1:
@@ -111,13 +114,16 @@ def casa_widebandpbcor(in_image, model, model_images, nterms, band, freqAxis, fr
         tt0_untrimmed[0].data[0,0,:,:] = alpha
         if trim:
             tt0_untrimmed = helpers.trim_image(tt0_untrimmed, pb_tt0, thresh, trim)
+        print(f"--> Saving primary beam corrected spectral index image '{out_image+'_pbcorr_alpha.fits'}'")
         helpers.write_image_fits(tt0_untrimmed, out_image+'_pbcorr_alpha', model)
 
         if write_beams:
             temp_img[0].data[0,0,:,:] = pb_tt1
-            helpers.write_image_fits(temp_img, 'pb_alpha', model)
+            print(f"--> Saving tt1 primary beam 'pb_tt1.fits'")
+            helpers.write_image_fits(temp_img, 'pb_tt1', model)
 
             temp_img[0].data[0,0,:,:] = pb_tt1 / pb_tt0
+            print(f"--> Saving alpha primary beam 'pb_alpha.fits'")
             helpers.write_image_fits(temp_img, 'pb_alpha', model)
 
 def weighted_widebandpbcor(in_image, model, model_images, band, freqs, weights, thresh, trim, write_beams, outdir):
@@ -147,11 +153,13 @@ def weighted_widebandpbcor(in_image, model, model_images, band, freqs, weights, 
     mfs_img[0].data[0, 0][mfs_pb < thresh] = np.nan
     if trim:
         mfs_img = helpers.trim_image(mfs_img, mfs_pb, thresh, trim)
+    print(f"--> Saving primary beam corrected image '{out_image+'-pbcorr.fits'}'")
     helpers.write_image_fits(mfs_img, out_image+'-pbcor', model)
 
     if write_beams:
         # Write PB images
         temp_img[0].data[0,0,:,:] = mfs_pb
+        print(f"--> Saving mfs primary beam 'mfs_pb.fits'")
         helpers.write_image_fits(temp_img, 'mfs_pb', model)
 
 def main():
@@ -203,7 +211,7 @@ def main():
 
     if mfs_mode.lower() == 'casa':
         if len(freqs) < nterms:
-            print('Number of frequencies is lower than number of Taylor terms, fit cannot be performed')
+            print("Number of frequencies is lower than number of Taylor terms, fit cannot be performed")
             sys.exit()
         casa_widebandpbcor(in_image, model, model_images, 
                            nterms, band, freqAxis, freqs, 
@@ -211,21 +219,24 @@ def main():
 
     # In wsclean, determine frequencies and weights of channels
     if mfs_mode.lower() == 'wsclean':
+        print("Reading frequencies and weights assuming wsclean outputs")
+
         freqs = []
         weights = []
         spw_images = sorted(glob.glob(in_image+'-0*-image.fits'))
         for spw_im_file in spw_images:
+            chan_num = int(os.path.basename(spw_im_file).rsplit('-',2)[1])
             spw_im = helpers.open_fits_casa(spw_im_file)
 
             freq = spw_im[0].header['CRVAL'+str(freqAxis)]/1e6 #MHz
             weight = 1/spw_im[0].header['WSCIMGWG']*1e9
-            print(freq, weight)
+            print(f"Channel image {chan_num} has central frequency {freq:.2f} MHz and weight {weight:.2g}")
 
             freqs.append(freq)
             weights.append(weight)
 
     if mfs_mode.lower() == 'wsclean' or mfs_mode.lower() == 'weighted' :
-        assert len(freqs) == len(weights), "Different lengths of frequencies and weights"
+        assert len(freqs) == len(weights), "Different number of frequencies and weights!"
 
         weighted_widebandpbcor(mfs_image_file, model, model_images,
                                band, freqs, weights, thresh, trim, write_beams, outdir)
