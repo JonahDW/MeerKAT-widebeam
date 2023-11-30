@@ -1,3 +1,4 @@
+import os
 import numpy as np
 
 import casacore.images as pim
