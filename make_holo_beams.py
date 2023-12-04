@@ -2,9 +2,7 @@ import os
 import argparse
 import numpy as np
 
-import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
-
 from astropy.io import fits
 
 import helpers
@@ -77,10 +75,10 @@ def main():
             beam /= beam.max()
 
             # Rescale beam to specified cell and image size
-            scaling_func = RegularGridInterpolator((margin, margin), beam)
+            scaling_func = RegularGridInterpolator((margin, margin), beam, method='linear')
             new_margin = np.linspace(-imsize*celldeg/2, imsize*celldeg/2, imsize)
             XX, YY = np.meshgrid(new_margin, new_margin)
-            scaled_beam = scaling_func((XX, YY))
+            scaled_beam = scaling_func((YY, XX))
 
             # Create and write to fits
             hdu = fits.PrimaryHDU(scaled_beam)
