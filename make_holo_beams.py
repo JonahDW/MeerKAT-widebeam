@@ -65,11 +65,12 @@ def main():
     out_freqs = np.array(freqs).astype(float)
     for freq in out_freqs:
         nearest_freq = np.argmin(np.abs(in_freqs - float(freq)))
+        beam_freq = beams[:,:,nearest_freq,:,:]
         print(f'Creating beam for {freq} MHz, nearest sampled frequency {in_freqs[nearest_freq]:.2f} MHz')
 
         for stoke in stokes:
             # Get beam and average over all antennas
-            out_beams = get_beam_pol(beams[:,:,nearest_freq,:,:], pols, stokes=stoke)
+            out_beams = get_beam_pol(beam_freq, pols, stokes=stoke)
             beam = np.mean(out_beams, axis=0)
             # Make sure beam is normalised
             beam /= beam.max()

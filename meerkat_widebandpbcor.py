@@ -168,6 +168,7 @@ def main():
     model_images = args.model_images
     freqs = args.freqs
     weights = args.weights
+    invert_weights = args.invert_weights
     nterms = args.nterms
     alpha_thresh = args.alpha_thresh
     write_beams = args.write_beams
@@ -214,6 +215,8 @@ def main():
 
             freq = spw_im[0].header['CRVAL'+str(freqAxis)]/1e6 #MHz
             weight = 1/spw_im[0].header['WSCIMGWG']*1e9
+            if invert_weights:
+                weight = 1/weight
             print(f"Channel image {chan_num} has central frequency {freq:.2f} MHz and weight {weight:.2g}")
 
             freqs.append(freq)
@@ -273,6 +276,7 @@ def new_argument_parser():
                         the data used for imaging""")
     parser.add_argument("--weights", nargs='+', default=None,
                         help="""Weights associated with the input frequencies for a weighted primary beam""")
+    parser.add_argument("--invert_weights", action='store_true', help="Invert the weights")
     parser.add_argument("--nterms", default=2, type=int, help="Number of Taylor coefficients")
     parser.add_argument("--alpha_thresh", default=0, type=float,
                         help="""Mask all pixels below this flux level in the spectral index image (default=0).""")
