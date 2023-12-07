@@ -12,7 +12,7 @@ from astropy.wcs import WCS
 
 import helpers
 
-def calculate_beams(image, model, model_images, band, freqs):
+def calculate_beams(image, model, model_images, band, freqs, outdir):
     '''
     Get beams at different frequencies
     '''
@@ -41,7 +41,8 @@ def calculate_beams(image, model, model_images, band, freqs):
         assert len(freqs) == len(model_images), "Different number of frequencies and model images!"
 
         pb_images = model_images
-        pbs = np.zeros(shape=(len(pb_images),im_shape[0]*im_shape[1]))
+        pbs = np.memmap(os.path.join(outdir,'temp.dat'), dtype=np.float32, mode='w+',
+                        shape=(len(pb_images),im_shape[0]*im_shape[1]))
         freqs = np.array(freqs, dtype=float)
         for i, pb_im in enumerate(pb_images):
             imagedata = helpers.open_fits_casa(pb_im)
@@ -59,8 +60,6 @@ def casa_widebandpbcor(in_image, pbs, nterms, freqAxis, freqs, thresh, alpha_thr
     Calculate the wideband PB correction for CASA images
     '''
     imagename = os.path.basename(in_image)
-    if outdir is None:
-        outdir = os.path.dirname(in_image)
     out_image = os.path.join(outdir, imagename)
 
     tt0_img = helpers.open_fits_casa(in_image+'.image.tt0')
@@ -127,8 +126,6 @@ def weighted_widebandpbcor(in_image, pbs, freqs, weights, thresh, trim, write_be
     Calculate the wideband PB correction with weighted images
     '''
     imagename = os.path.basename(in_image.rsplit('.',1)[0])
-    if outdir is None:
-        outdir = os.path.dirname(in_image)
     out_image = os.path.join(outdir, imagename)
 
     mfs_img = helpers.open_fits_casa(in_image)
@@ -188,6 +185,9 @@ def main():
         print(f'Input image {mfs_image_file} not found')
         sys.exit(0)
 
+    if outdir is None:
+        outdir = os.path.dirname(in_image)
+
     # Determine frequency axis
     # Order depends on if e.g. CASA or WSClean image
     polAxis = None
@@ -223,7 +223,7 @@ def main():
             weights.append(weight)
 
     # Get primary beam models
-    pb_images, freqs = calculate_beams(mfs_img, model, model_images, band, freqs)
+    pb_images, freqs = calculate_beams(mfs_img, model, model_images, band, freqs, outdir)
 
     # CASA primary beam correction
     if mfs_mode.lower() == 'casa':
@@ -239,6 +239,11 @@ def main():
 
         weighted_widebandpbcor(mfs_image_file, pb_images, freqs, weights, 
                                thresh, trim, write_beams, model, outdir)
+
+    # Clean up
+    if model == 'images':
+        os.remove(os.path.join(outdir,'temp.dat'))
+
 
 def new_argument_parser():
 
