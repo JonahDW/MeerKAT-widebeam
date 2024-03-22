@@ -222,6 +222,12 @@ def main():
             freqs.append(freq)
             weights.append(weight)
 
+    # If using single frequency, determine frequency from image
+    if mfs_mode.lower() == 'none' and freqs is None:
+        print(f"No mfs mode and frequency given, using the central frequency of input image if needed")
+        freqs = [freqMHz]
+        weights = [1]
+
     # Get primary beam models
     pb_images, freqs = calculate_beams(mfs_img, model, model_images, band, freqs, outdir)
 
@@ -232,9 +238,8 @@ def main():
             sys.exit()
         casa_widebandpbcor(in_image, pb_images, nterms, freqAxis, freqs,
                            thresh, alpha_thresh, trim, write_beams, model, outdir)
-
-    # WSClean or weighted primray beam correction
-    if mfs_mode.lower() == 'wsclean' or mfs_mode.lower() == 'weighted' :
+    else:
+        # WSClean, weighted, or single frequency primary beam correction
         assert len(freqs) == len(weights), "Different number of frequencies and weights!"
 
         weighted_widebandpbcor(mfs_image_file, pb_images, freqs, weights, 
