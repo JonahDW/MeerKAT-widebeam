@@ -33,7 +33,8 @@ def calculate_beams(image, model, model_images, band, freqs, outdir):
         xDegMap, yDegMap = helpers.makeXYDegreesDistanceMaps(np.ones(im_shape, dtype = np.float64), wcs, RADeg, decDeg)
 
         freqs = np.array(freqs, dtype=float)
-        pbs = np.zeros(shape=(len(freqs),len(xDegMap)*len(yDegMap)))
+        pbs = np.memmap(os.path.join(outdir,'temp_beams.dat'), dtype=np.float32, mode='w+',
+                        shape=(len(freqs),len(xDegMap)*len(yDegMap)))
         for i, freqMHz in enumerate(freqs):
             pbs[i,:] = beam.I(xDegMap, yDegMap, freqMHz).flatten()
 
@@ -41,7 +42,7 @@ def calculate_beams(image, model, model_images, band, freqs, outdir):
         assert len(freqs) == len(model_images), "Different number of frequencies and model images!"
 
         pb_images = model_images
-        pbs = np.memmap(os.path.join(outdir,'temp.dat'), dtype=np.float32, mode='w+',
+        pbs = np.memmap(os.path.join(outdir,'temp_beams.dat'), dtype=np.float32, mode='w+',
                         shape=(len(pb_images),im_shape[0]*im_shape[1]))
         freqs = np.array(freqs, dtype=float)
         for i, pb_im in enumerate(pb_images):
@@ -142,7 +143,7 @@ def weighted_widebandpbcor(in_image, pbs, freqs, weights, thresh, trim, write_be
     mfs_img[0].data[0, 0][mfs_pb < thresh] = np.nan
     if trim:
         mfs_img = helpers.trim_image(mfs_img, mfs_pb, thresh, trim)
-    print(f"--> Saving primary beam corrected image '{out_image+'-pbcorr.fits'}'")
+    print(f"--> Saving primary beam corrected image '{out_image+'-pbcor.fits'}'")
     helpers.write_image_fits(mfs_img, out_image+'-pbcor', model)
 
     if write_beams:
@@ -150,6 +151,57 @@ def weighted_widebandpbcor(in_image, pbs, freqs, weights, thresh, trim, write_be
         temp_img[0].data[0,0,:,:] = mfs_pb
         print(f"--> Saving mfs primary beam 'mfs_pb.fits'")
         helpers.write_image_fits(temp_img, 'mfs_pb', model)
+
+def weighted_channel_pbcor(in_image, channel_images, pbs, freqs, weights, thresh, trim, model, outdir):
+    '''
+    Perform primary beam correction on channel images and combine them in a weighted average
+    '''
+    imagename = os.path.basename(in_image.rsplit('.',1)[0])
+    out_image = os.path.join(outdir, imagename)
+
+    mfs_img = helpers.open_fits_casa(in_image)
+    wcs = WCS(mfs_img[0].header).copy()
+
+    img_shape = np.squeeze(mfs_img[0].data).shape
+    temp_img = copy.deepcopy(mfs_img)
+
+    channel_imgs = np.memmap(os.path.join(outdir,'temp_imgs.dat'), dtype=np.float32, mode='w+',
+                         shape=(len(channel_images), img_shape[0], img_shape[1]))
+    for i, channel_image in enumerate(channel_images):
+        channel_imgs[i,:,:] = channel_pbcor(channel_image, pbs[i], freqs[i],
+                                            thresh, trim, model, outdir)
+
+    temp_img[0].data[0,0,:,:] = np.average(channel_imgs, axis=0, weights=weights)
+    print(f"--> Saving primary beam corrected image '{out_image+'-pbcor.fits'}'")
+    helpers.write_image_fits(temp_img, out_image+'-pbcor', model)
+
+    # Clean up
+    os.remove(os.path.join(outdir,'temp_imgs.dat'))
+
+def channel_pbcor(in_image, pb, freq, thresh, trim, model, outdir):
+    '''
+    Do primary beam correction on channel imagem, using single frequency
+    '''
+    imagename = os.path.basename(in_image.rsplit('.',1)[0])
+    out_image = os.path.join(outdir, imagename)
+
+    channel_img = helpers.open_fits_casa(in_image)
+    wcs = WCS(channel_img[0].header).copy()
+
+    img_shape = np.squeeze(channel_img[0].data).shape
+    pb = pb.reshape(img_shape)
+
+    channel_img[0].data[0,0,:,:] = channel_img[0].data[0,0,:,:]/pb
+    return_image = channel_img[0].data[0,0,:,:]
+
+    # Threshold and trim
+    channel_img[0].data[0, 0][pb < thresh] = np.nan
+    if trim:
+        img = helpers.trim_image(channel_img, pb, thresh, trim)
+    print(f"--> Saving primary beam corrected channel image '{out_image+'-pbcor.fits'}'")
+    helpers.write_image_fits(channel_img, out_image+'-pbcor', model)
+
+    return return_image
 
 def main():
 
@@ -172,7 +224,7 @@ def main():
     outdir = args.outdir
 
     # Open mfs image for header information
-    if mfs_mode.lower() == 'wsclean':
+    if 'wsclean' in mfs_mode.lower():
         mfs_image_file = in_image+'-MFS-image.fits'
     elif mfs_mode.lower() == 'casa':
         mfs_image_file = in_image+'.image.tt0'
@@ -203,18 +255,18 @@ def main():
     print("Image central Frequency = %.3f MHz" % (freqMHz))
 
     # In wsclean, determine frequencies and weights of channels
-    if mfs_mode.lower() == 'wsclean':
+    if 'wsclean' in mfs_mode.lower():
         print("Reading frequencies and weights assuming wsclean outputs")
 
         freqs = []
         weights = []
-        spw_images = sorted(glob.glob(in_image+'-0*-image.fits'))
-        for spw_im_file in spw_images:
-            chan_num = int(os.path.basename(spw_im_file).rsplit('-',2)[1])
-            spw_im = helpers.open_fits_casa(spw_im_file)
+        channel_images = sorted(glob.glob(in_image+'-0*-image.fits'))
+        for channel_im_file in channel_images:
+            chan_num = int(os.path.basename(channel_im_file).rsplit('-',2)[1])
+            channel_im = helpers.open_fits_casa(channel_im_file)
 
-            freq = spw_im[0].header['CRVAL'+str(freqAxis)]/1e6 #MHz
-            weight = 1/spw_im[0].header['WSCIMGWG']*1e9
+            freq = channel_im[0].header['CRVAL'+str(freqAxis)]/1e6 #MHz
+            weight = 1/channel_im[0].header['WSCIMGWG']*1e9
             if invert_weights:
                 weight = 1/weight
             print(f"Channel image {chan_num} has central frequency {freq:.2f} MHz and weight {weight:.2g}")
@@ -223,10 +275,8 @@ def main():
             weights.append(weight)
 
     # If using single frequency, determine frequency from image
-    if mfs_mode.lower() == 'none' and freqs is None:
-        print(f"No mfs mode and frequency given, using the central frequency of input image if needed")
+    if mfs_mode.lower() == 'none':
         freqs = [freqMHz]
-        weights = [1]
 
     # Get primary beam models
     pb_images, freqs = calculate_beams(mfs_img, model, model_images, band, freqs, outdir)
@@ -238,16 +288,22 @@ def main():
             sys.exit()
         casa_widebandpbcor(in_image, pb_images, nterms, freqAxis, freqs,
                            thresh, alpha_thresh, trim, write_beams, model, outdir)
+    # WSClean channel primary beam correction
+    elif mfs_mode.lower() == 'wsclean-channel':
+        weighted_channel_pbcor(mfs_image_file, channel_images, pb_images, freqs, 
+                               weights, thresh, trim, model, outdir)
+    # Single frequency primary beam correction
+    elif mfs_mode.lower() == 'none':
+        channel_image = channel_pbcor(in_image, pb_images[0], freqMHz, thresh, trim, model, outdir)
+    # WSClean or weighted primary beam correction
     else:
-        # WSClean, weighted, or single frequency primary beam correction
         assert len(freqs) == len(weights), "Different number of frequencies and weights!"
 
         weighted_widebandpbcor(mfs_image_file, pb_images, freqs, weights, 
                                thresh, trim, write_beams, model, outdir)
 
     # Clean up
-    if model == 'images':
-        os.remove(os.path.join(outdir,'temp.dat'))
+    os.remove(os.path.join(outdir,'temp_beams.dat'))
 
 
 def new_argument_parser():
@@ -263,7 +319,8 @@ def new_argument_parser():
                         for the image to determine the primary beam model. 'casa' assumes Taylor term
                         imaging with casa file structure, while 'wsclean' assumes weighted imaging with
                         a wsclean structure. 'weighted' will assume weighted imaging but without file
-                        structure, so frequencies and weights are input manually.""")
+                        structure, so frequencies and weights are input manually. To do primary beam 
+                        correction at a single frequency without wideband mfs, choose 'none'""")
     parser.add_argument("-m", "--model", type=str, default="katbeam",
                         help="""Which primary beam model to use, options are 'katbeam' or 'images', in the latter
                                 case input images must be specified by model_images parameter (default=katbeam).""")
