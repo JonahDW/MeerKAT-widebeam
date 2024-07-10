@@ -19,8 +19,9 @@ usage: meerkat_widebandpbcor.py [-h] [-m MODEL] [-b BAND] [-t THRESH] [-T]
                                 [--model_images MODEL_IMAGES [MODEL_IMAGES ...]]
                                 [--freqs FREQS [FREQS ...]]
                                 [--weights WEIGHTS [WEIGHTS ...]]
-                                [--nterms NTERMS]
+                                [--invert_weights] [--nterms NTERMS]
                                 [--alpha_thresh ALPHA_THRESH] [--write_beams]
+                                [--outdir OUTDIR]
                                 image_name mfs_mode
 
 positional arguments:
@@ -37,8 +38,9 @@ positional arguments:
                         while 'wsclean' assumes weighted imaging with a
                         wsclean structure. 'weighted' will assume weighted
                         imaging but without file structure, so frequencies and
-                        weights are input manually. To do primary beam correction
-                        at a single frequency without wideband mfs, choose 'none'
+                        weights are input manually. To do primary beam
+                        correction at a single frequency without wideband mfs,
+                        choose 'none'
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -70,12 +72,14 @@ optional arguments:
   --weights WEIGHTS [WEIGHTS ...]
                         Weights associated with the input frequencies for a
                         weighted primary beam
+  --invert_weights      Invert the weights
   --nterms NTERMS       Number of Taylor coefficients
   --alpha_thresh ALPHA_THRESH
                         Mask all pixels below this flux level in the spectral
                         index image (default=0).
   --write_beams         Write derived beams to fits files (default=do not
                         write files).
+  --outdir OUTDIR       Output directory of images.
 ```
 
 ## make_holo_beams.py
