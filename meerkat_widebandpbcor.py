@@ -122,6 +122,42 @@ def casa_widebandpbcor(in_image, pbs, nterms, freqAxis, freqs, thresh, alpha_thr
             print(f"--> Saving alpha primary beam 'pb_alpha.fits'")
             helpers.write_image_fits(temp_img, 'pb_alpha', model)
 
+def polynomial_widebandpbcor(in_image, pbs, nterms, freqAxis, freqs, thresh, trim, write_beams, model, outdir):
+    '''
+    Perform primary beam correction on channel images and combine them in a weighted average
+    '''
+    imagename = os.path.basename(in_image.rsplit('.',1)[0])
+    out_image = os.path.join(outdir, imagename)
+
+    mfs_img = helpers.open_fits_casa(in_image)
+    wcs = WCS(mfs_img[0].header).copy()
+
+    img_shape = np.squeeze(mfs_img[0].data).shape
+    temp_img = copy.deepcopy(mfs_img)
+
+    # Fit nth order polynomial to primary beams
+    cfreq = mfs_img[0].header['CRVAL'+str(freqAxis)]/1e6 #MHz
+    x = (freqs-cfreq)/cfreq
+
+    pb_polyfit = np.polynomial.polynomial.polyfit(x, pbs, deg=nterms-1)
+    # Renormalize tt0 to correct any small errors
+    pb_polyfit[0,:] /= np.nanmax(pb_polyfit[0,:])
+
+    # Apply PB for Taylor term 0 image
+    mfs_pb = pb_polyfit[0,:].reshape(img_shape)
+    mfs_img[0].data[0,0,:,:] = mfs_img[0].data[0,0,:,:]/mfs_pb
+
+    if trim:
+        mfs_img = helpers.trim_image(mfs_img, mfs_pb, thresh, trim)
+    print(f"--> Saving primary beam corrected image '{out_image+'-pbcor.fits'}'")
+    helpers.write_image_fits(mfs_img, out_image+'-pbcor', model)
+
+    if write_beams:
+        # Write PB images
+        temp_img[0].data[0,0,:,:] = mfs_pb
+        print(f"--> Saving mfs primary beam 'mfs_pb.fits'")
+        helpers.write_image_fits(temp_img, 'mfs_pb', model)
+
 def weighted_widebandpbcor(in_image, pbs, freqs, weights, thresh, trim, write_beams, model, outdir):
     '''
     Calculate the wideband PB correction with weighted images
@@ -151,32 +187,6 @@ def weighted_widebandpbcor(in_image, pbs, freqs, weights, thresh, trim, write_be
         temp_img[0].data[0,0,:,:] = mfs_pb
         print(f"--> Saving mfs primary beam 'mfs_pb.fits'")
         helpers.write_image_fits(temp_img, 'mfs_pb', model)
-
-def weighted_channel_pbcor(in_image, channel_images, pbs, freqs, weights, thresh, trim, model, outdir):
-    '''
-    Perform primary beam correction on channel images and combine them in a weighted average
-    '''
-    imagename = os.path.basename(in_image.rsplit('.',1)[0])
-    out_image = os.path.join(outdir, imagename)
-
-    mfs_img = helpers.open_fits_casa(in_image)
-    wcs = WCS(mfs_img[0].header).copy()
-
-    img_shape = np.squeeze(mfs_img[0].data).shape
-    temp_img = copy.deepcopy(mfs_img)
-
-    channel_imgs = np.memmap(os.path.join(outdir,'temp_imgs.dat'), dtype=np.float32, mode='w+',
-                         shape=(len(channel_images), img_shape[0], img_shape[1]))
-    for i, channel_image in enumerate(channel_images):
-        channel_imgs[i,:,:] = channel_pbcor(channel_image, pbs[i], freqs[i],
-                                            thresh, trim, model, outdir)
-
-    temp_img[0].data[0,0,:,:] = np.average(channel_imgs, axis=0, weights=weights)
-    print(f"--> Saving primary beam corrected image '{out_image+'-pbcor.fits'}'")
-    helpers.write_image_fits(temp_img, out_image+'-pbcor', model)
-
-    # Clean up
-    os.remove(os.path.join(outdir,'temp_imgs.dat'))
 
 def channel_pbcor(in_image, pb, freq, thresh, trim, model, outdir):
     '''
@@ -288,10 +298,15 @@ def main():
             sys.exit()
         casa_widebandpbcor(in_image, pb_images, nterms, freqAxis, freqs,
                            thresh, alpha_thresh, trim, write_beams, model, outdir)
-    # WSClean channel primary beam correction
-    elif mfs_mode.lower() == 'wsclean-channel':
-        weighted_channel_pbcor(mfs_image_file, channel_images, pb_images, freqs, 
-                               weights, thresh, trim, model, outdir)
+
+    # WSClean polynomial primary beam correction
+    elif mfs_mode.lower() == 'wsclean-poly':
+        if len(freqs) < nterms:
+            print("Number of frequencies is lower than number of Taylor terms, fit cannot be performed")
+            sys.exit()
+        polynomial_widebandpbcor(mfs_image_file, pb_images, nterms, freqAxis, freqs,
+                                 thresh, trim, write_beams, model, outdir)
+
     # Single frequency primary beam correction
     elif mfs_mode.lower() == 'none':
         channel_image = channel_pbcor(in_image, pb_images[0], freqMHz, thresh, trim, model, outdir)
