@@ -147,6 +147,7 @@ def polynomial_widebandpbcor(in_image, pbs, nterms, freqAxis, freqs, thresh, tri
     mfs_pb = pb_polyfit[0,:].reshape(img_shape)
     mfs_img[0].data[0,0,:,:] = mfs_img[0].data[0,0,:,:]/mfs_pb
 
+    mfs_img[0].data[0, 0][mfs_pb < thresh] = np.nan
     if trim:
         mfs_img = helpers.trim_image(mfs_img, mfs_pb, thresh, trim)
     print(f"--> Saving primary beam corrected image '{out_image+'-pbcor.fits'}'")
@@ -276,7 +277,11 @@ def main():
             channel_im = helpers.open_fits_casa(channel_im_file)
 
             freq = channel_im[0].header['CRVAL'+str(freqAxis)]/1e6 #MHz
-            weight = 1/channel_im[0].header['WSCIMGWG']*1e9
+            if channel_im[0].header['WSCIMGWG'] == 0:
+                print(f"Weight of subband is zero, unexpected results might occur")
+                weight = 0
+            else:
+                weight = 1/channel_im[0].header['WSCIMGWG']*1e9
             if invert_weights:
                 weight = 1/weight
             print(f"Channel image {chan_num} has central frequency {freq:.2f} MHz and weight {weight:.2g}")
