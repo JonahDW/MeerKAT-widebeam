@@ -16,11 +16,11 @@ The `mfs_mode` options are:
 Two different types of primary beam models are supported in the `model` keyword, either `katbeam` (default) which uses [katbeam](https://github.com/ska-sa/katbeam) models, or `images` where the primary beam model images on file can be specified. This latter option is useful, for instance, when you have generated holographic primary beam models with the `make_holo_beams.py` script (see below). Beware that when you supply lists of model images, weights, and frequencies, the order must be correct! The script can not and will not check beyond whether the lists are the same length.
 
 ```
-usage: meerkat_widebandpbcor.py [-h] [-m MODEL] [-b BAND] [-t THRESH] [-T]
-                                [--model_images MODEL_IMAGES [MODEL_IMAGES ...]]
+usage: meerkat_widebandpbcor.py [-h] [-m MODEL] [-b BAND] [-t THRESHOLD] [-T]
                                 [--freqs FREQS [FREQS ...]]
                                 [--weights WEIGHTS [WEIGHTS ...]]
-                                [--invert_weights] [--nterms NTERMS]
+                                [--model_images MODEL_IMAGES [MODEL_IMAGES ...]]
+                                [--nterms NTERMS] [--correct_channels]
                                 [--alpha_thresh ALPHA_THRESH] [--write_beams]
                                 [--outdir OUTDIR]
                                 image_name mfs_mode
@@ -51,17 +51,13 @@ optional arguments:
                         specified by model_images parameter (default=katbeam).
   -b BAND, --band BAND  If using katbeam, specify band for which primary beam
                         model will be used, can be L, UHF, or S (default = L).
-  -t THRESH, --threshold THRESH
+  -t THRESHOLD, --threshold THRESHOLD
                         Threshold (at central frequency) below which image
                         pixels will be set to blank values (nan). Use to
                         remove areas where the primary beam correction is
                         large (default=0.3).
   -T, --trim            Trim image outside valid region (set by --threshold)
                         to reduce size.
-  --model_images MODEL_IMAGES [MODEL_IMAGES ...]
-                        Specify files with PB images to to fit wideband
-                        primary beam. Corresponding frequencies must be given
-                        with the freqs parameter.
   --freqs FREQS [FREQS ...]
                         Frequencies (in MHz) to use to generate the primary
                         beam (katbeam) or frequencies corresponding to input
@@ -73,8 +69,13 @@ optional arguments:
   --weights WEIGHTS [WEIGHTS ...]
                         Weights associated with the input frequencies for a
                         weighted primary beam
-  --invert_weights      Invert the weights
-  --nterms NTERMS       Number of Taylor coefficients
+  --model_images MODEL_IMAGES [MODEL_IMAGES ...]
+                        Specify files with PB images to to fit wideband
+                        primary beam. Corresponding frequencies must be given
+                        with the freqs parameter.
+  --nterms NTERMS       Number of Taylor coefficients for polynomial fit
+  --correct_channels    In wsclean mode, also correct all channel images at
+                        the same time.
   --alpha_thresh ALPHA_THRESH
                         Mask all pixels below this flux level in the spectral
                         index image (default=0).

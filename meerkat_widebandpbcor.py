@@ -189,7 +189,7 @@ def weighted_widebandpbcor(in_image, pbs, freqs, weights, thresh, trim, write_be
         print(f"--> Saving mfs primary beam 'mfs_pb.fits'")
         helpers.write_image_fits(temp_img, 'mfs_pb', model)
 
-def channel_pbcor(in_image, pb, freq, thresh, trim, model, outdir):
+def channel_pbcor(in_image, pb, freq, thresh, trim, model, outdir, write_beams=False):
     '''
     Do primary beam correction on channel imagem, using single frequency
     '''
@@ -197,6 +197,7 @@ def channel_pbcor(in_image, pb, freq, thresh, trim, model, outdir):
     out_image = os.path.join(outdir, imagename)
 
     channel_img = helpers.open_fits_casa(in_image)
+    temp_img = copy.deepcopy(channel_img)
     wcs = WCS(channel_img[0].header).copy()
 
     img_shape = np.squeeze(channel_img[0].data).shape
@@ -212,7 +213,11 @@ def channel_pbcor(in_image, pb, freq, thresh, trim, model, outdir):
     print(f"--> Saving primary beam corrected channel image '{out_image+'-pbcor.fits'}'")
     helpers.write_image_fits(channel_img, out_image+'-pbcor', model)
 
-    return return_image
+    if write_beams:
+        # Write PB images
+        temp_img[0].data[0,0,:,:] = pb
+        print(f"--> Saving channel primary beam '{freq:.2f}MHz_pb.fits'")
+        helpers.write_image_fits(temp_img, f'{freq:.2f}MHz_pb', model)
 
 def main():
 
@@ -223,13 +228,13 @@ def main():
     mfs_mode = args.mfs_mode
     model = args.model
     band = args.band
-    thresh = args.thresh
+    thresh = args.threshold
     trim = args.trim
     model_images = args.model_images
     freqs = args.freqs
     weights = args.weights
-    invert_weights = args.invert_weights
     nterms = args.nterms
+    correct_channels = args.correct_channels
     alpha_thresh = args.alpha_thresh
     write_beams = args.write_beams
     outdir = args.outdir
@@ -263,7 +268,7 @@ def main():
     assert(polAxis is not None and freqAxis is not None)
     freqMHz = mfs_img[0].header['CRVAL%d' % (freqAxis)]/1e6
 
-    print("Image central Frequency = %.3f MHz" % (freqMHz))
+    print(f"Image central Frequency = {freqMHz:.2f} MHz")
 
     # In wsclean, determine frequencies and weights of channels
     if 'wsclean' in mfs_mode.lower():
@@ -278,12 +283,10 @@ def main():
 
             freq = channel_im[0].header['CRVAL'+str(freqAxis)]/1e6 #MHz
             if channel_im[0].header['WSCIMGWG'] == 0:
-                print(f"Weight of subband is zero, unexpected results might occur")
+                print(f"Weight of channel {chan_num} is zero, so will not be counted")
                 weight = 0
             else:
                 weight = 1/channel_im[0].header['WSCIMGWG']*1e9
-            if invert_weights:
-                weight = 1/weight
             print(f"Channel image {chan_num} has central frequency {freq:.2f} MHz and weight {weight:.2g}")
 
             freqs.append(freq)
@@ -311,16 +314,26 @@ def main():
             sys.exit()
         polynomial_widebandpbcor(mfs_image_file, pb_images, nterms, freqAxis, freqs,
                                  thresh, trim, write_beams, model, outdir)
+        if correct_channels:
+            print("Correcting channel images as well")
+            for i, channel_image in enumerate(channel_images):
+                channel_pbcor(channel_image, pb_images[i], freqs[i],
+                              thresh, trim, model, outdir, write_beams)
 
     # Single frequency primary beam correction
     elif mfs_mode.lower() == 'none':
-        channel_image = channel_pbcor(in_image, pb_images[0], freqMHz, thresh, trim, model, outdir)
+        channel_pbcor(in_image, pb_images[0], freqMHz, thresh, trim, model, outdir, write_beams)
     # WSClean or weighted primary beam correction
     else:
         assert len(freqs) == len(weights), "Different number of frequencies and weights!"
 
         weighted_widebandpbcor(mfs_image_file, pb_images, freqs, weights, 
                                thresh, trim, write_beams, model, outdir)
+        if correct_channels:
+            print("Correcting channel images as well")
+            for i, channel_image in enumerate(channel_images):
+                channel_pbcor(channel_image, pb_images[i], freqs[i],
+                              thresh, trim, model, outdir, write_beams)
 
     # Clean up
     os.remove(os.path.join(outdir,'temp_beams.dat'))
@@ -344,17 +357,14 @@ def new_argument_parser():
     parser.add_argument("-m", "--model", type=str, default="katbeam",
                         help="""Which primary beam model to use, options are 'katbeam' or 'images', in the latter
                                 case input images must be specified by model_images parameter (default=katbeam).""")
-    parser.add_argument("-b", "--band", dest="band", default="L", help="""If using katbeam, specify band 
+    parser.add_argument("-b", "--band", default="L", help="""If using katbeam, specify band 
                             for which primary beam model will be used, can be L, UHF, or S (default = L).""")
-    parser.add_argument("-t", "--threshold", dest="thresh", default=0.3, type=float,
+    parser.add_argument("-t", "--threshold", default=0.3, type=float,
                         help="""Threshold (at central frequency) below which image pixels will be 
                                 set to blank values (nan). Use to remove areas where the primary beam
                                 correction is large (default=0.3).""")
-    parser.add_argument("-T", "--trim", dest="trim", help="""Trim image outside valid region (set by
-                        --threshold) to reduce size.""", default=False, action='store_true')
-    parser.add_argument("--model_images", nargs='+', default=None,
-                        help="""Specify files with PB images to to fit wideband primary beam. Corresponding
-                                frequencies must be given with the freqs parameter.""")
+    parser.add_argument("-T", "--trim", default=False, action='store_true',
+                        help="""Trim image outside valid region (set by --threshold) to reduce size.""")
     parser.add_argument("--freqs", nargs='+', default=None,
                         help="""Frequencies (in MHz) to use to generate the primary beam (katbeam) or frequencies
                         corresponding to input model images (images). If using Taylor terms, the number of 
@@ -363,12 +373,16 @@ def new_argument_parser():
                         the data used for imaging""")
     parser.add_argument("--weights", nargs='+', default=None,
                         help="""Weights associated with the input frequencies for a weighted primary beam""")
-    parser.add_argument("--invert_weights", action='store_true', help="Invert the weights")
-    parser.add_argument("--nterms", default=2, type=int, help="Number of Taylor coefficients")
+    parser.add_argument("--model_images", nargs='+', default=None,
+                        help="""Specify files with PB images to to fit wideband primary beam. Corresponding
+                                frequencies must be given with the freqs parameter.""")
+    parser.add_argument("--nterms", default=2, type=int, help="Number of Taylor coefficients for polynomial fit")
+    parser.add_argument("--correct_channels", action='store_true',
+                        help="In wsclean mode, also correct all channel images at the same time.")
     parser.add_argument("--alpha_thresh", default=0, type=float,
-                        help="""Mask all pixels below this flux level in the spectral index image (default=0).""")
+                        help="Mask all pixels below this flux level in the spectral index image (default=0).")
     parser.add_argument("--write_beams", action='store_true',
-                        help="""Write derived beams to fits files (default=do not write files).""")
+                        help="Write derived beams to fits files (default=do not write files).")
     parser.add_argument("--outdir", default=None, type=str, help="Output directory of images.")
 
     return parser
